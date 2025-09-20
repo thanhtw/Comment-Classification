@@ -138,9 +138,9 @@ def load_and_clean_data(path):
     data = data[data['text'] != '']  # 移除空文字
     return data
 
-data = load_and_clean_data('../data/cleaned_3label_data.csv') 
+data = load_and_clean_data('../data/two-label-data.csv') 
 assert data.isna().sum().sum() == 0, "data存在未處理的 NaN！"
-for col in ['relevance', 'concreteness', 'constructive']:
+for col in ['label']:
     data[col] = data[col].astype(int)
 
 # 2. 中文文本預處理
