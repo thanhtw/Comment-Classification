@@ -37,7 +37,7 @@ class WeightedTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # <--- add **kwargs
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get('logits')
@@ -56,6 +56,7 @@ class WeightedTrainer(Trainer):
             loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         
         return (loss, outputs) if return_outputs else loss
+
 
 # Preprocessing function
 def preprocess_function(examples, tokenizer):
