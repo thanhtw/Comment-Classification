@@ -1,0 +1,612 @@
+text,label
+命名正確,0
+棒棒搭~,1
+"1.少PlayGenerator.java(已經確認好幾次了，感覺是沒有上傳成功!)
+2.你的Gesture無法讀取!
+",0
+非常完美，沒有可以挑剔的，寫得很完整,0
+類別，助教預設的,0
+你好棒,1
+score situation average 沒有初始化,0
+未完成,1
+是，有撰寫javaDoc,0
+main沒東西,0
+並未上傳作業,0
+符合鰾準,1
+是的，符合撰寫標準 。,0
+javadoc也沒寫,0
+"輸入第二或三個不符合猜拳手勢時，須全部重新輸入，且顯示""Please re-enter the gesture""時，下一行又顯示Please enter your gesture.",0
+有達到題目要求,0
+Google Checkstyle有顯示在Student的類別裡面有缺少的Java doc,0
+輸出要是整數，因為題目測試結果沒有小數點,0
+有補上了GOOD,1
+非常完美,1
+否，無法game over,0
+"GeneralGame.java中程式碼的格式有錯
+第一行{前面應有空格
+第四行for後面應有空格，{前面應有空格
+
+",0
+題目無要求須輸入學生姓名與ID,0
+code沒辦法跑,0
+Greet.java : spacebar is between ANDY and !,0
+generalGame的play少寫javadoc,0
+很棒 中規中矩,0
+gamecount 改為 gameCount (然後 pratice 拼錯了少個c),0
+"Homework requires init with constructor , not using a method for initialize.
+As sample data std1 , you should init it as Student(""Tom"", 18, 170, 62);",0
+我覺得可以,1
+(double)/(int)放在input road/way那一行比較好,0
+google checks 沒過喔 縮排是兩格而已,0
+符合標準,0
+1.輸入不符合的手勢不用全部從頭重新輸入 2.平手的時候不用重新選擇遊戲局數直接重複遊戲 3.AdvancedGame中的play方法要覆寫GeneralGame中的方法@override,0
+輸入及輸出符合要求,0
+Game tie時直接結束了遊戲，題目需要直到分出勝負才能結束,0
+符合要求，但懷疑有chat gxx打code行為,0
+做得好，不像我忘記訂正的java人,1
+enum沒有JavaDoc,0
+Score Average後，冒號前不用空一格,0
+不整齊喔,1
+我想你應該沒有 push 到檔案喔,0
+compare 要回傳String[]才行,0
+第一個程式沒有用到'hello'這個字串 還是改一下比較好,0
+total拼錯ㄌ,0
+註解內容適中，不會太過簡短,0
+輸出輸出結果符合題目要求,0
+通常大括號前面都要有空格，if 和 for 後面的括號也要有空格。,0
+Gesture、PlayGenerator類別中皆有排版的小錯誤，可用google check確認一下。,0
+Main class 不符合 google checks,0
+縮排記得符合規範,0
+有印出Hello World!,0
+有些變數並未初始化,0
+Javadoc忘記打了ㄛ !,0
+方法命名符合規範,0
+GOOGLE規範中標註命名不能用超過一個連續大寫,0
+你少打JavaDoc了喔,0
+有達到要求,0
+是的，符合JavaDoc規範 。,0
+google check style 除了BMI的方法名之外有很多錯誤(縮排、註解、空格......),0
+"input.close();
+變數名稱建議命名有意義的名字",0
+無方法,0
+Gesture.java 與Game.java 未寫JavaDoc,0
+"Main、GeneralGame、AdvancedGame
+以及PlayGenerator各有一處未寫JavaDoc",0
+很棒 有印出Hello World!,0
+有達到標準喔,0
+記得寫註解,0
+水喔,1
+可以超棒的!，輸出符合,0
+後半段未完成,1
+你完全沒寫作業,0
+average是double型態，但total是int型態，建議轉換以相同型態運算,0
+JavaDoc的第一句缺少句點,0
+Good整齊,1
+是的是的！,1
+同學你的code似乎會有無限game tie 的狀況,0
+"scissors
+scissors
+scissors
+---ALL system gestures---
+STONE
+PAPER
+PAPER
+Game tie
+你的win跟lose 沒有+1
+你的條件判斷是有問題
+public String play(Gesture[] user) {
+        int win = 0, lose = 0;
+        for (int i = 0; i < 3; i++) {
+            sysGesture[i] = generateGestureByRandom();
+            if (user[i].equals(""scissors"")) {
+                if (sysGesture[i].equals(""PAPER"")) {
+                    win += 1;
+                }
+                if (sysGesture[i].equals(""STONE"")) {
+                    lose += 1;
+                }
+                if (sysGesture[i].equals(""SCISSORS"")) {
+                    //win = win;
+                    //lose = lose;
+                }
+            } else if (user[i].equals(""paper"")) {
+                if (sysGesture[i].equals(""STONE"")) {
+                    win += 1;
+                }
+                if (sysGesture[i].equals(""SCISSORS"")) {
+                    lose += 1;
+                }
+                if (sysGesture[i].equals(""PAPER"")) {
+                    win = win;
+                    lose = lose;
+                }
+            }else if (user[i].equals(""stone"")) {
+                if (sysGesture[i].equals(""SCISSORS"")) {
+                    win += 1;
+                }
+                if (sysGesture[i].equals(""PAPER"")) {
+                    lose += 1;
+                }
+                if (sysGesture[i].equals(""STONE"")) {
+                    win = win;
+                    lose = lose;
+                }
+            }
+        }
+你應該是用使用者輸入去判斷win and lose 的條件，加油。",0
+讚啦,1
+連寫都沒寫，沒有排版可言,0
+有的，太棒了!,1
+是的，有符合,1
+greet的hello不需換成大寫,0
+"是,但如果加上'!'會更好",0
+命名符合要求,0
+容易閱讀，有適當分行,0
+PlayGenerater拼字錯誤應為PlayGenerator,0
+沒有東西,1
+但是第十行的=旁邊要各空一格,0
+"1. 如果第一次輸入錯誤的範圍，第二次再以相同數字輸入的時候會是錯誤的。
+2. BMI輸出的結果都是0
+3. 不需要輸入TOM的數值",0
+註解應更詳細，輸出時小數點沒有設定輸出位數,0
+還是一堆checkstyle 錯誤 ，有些地方要空格,0
+"類別命名需要每一個單字的首字母都採用大寫字母
+第二題的Stringoperation的o要改大寫",0
+第一次輸入時顯示的字樣應是Please enter your gestrue. 而不是re-enter 其他沒有問題,0
+是的，符合預期,1
+Didn't change the constructor part.,0
+符合 很棒棒,1
+無程式碼,0
+有回傳值method的JavaDoc忘記加上 @return (回傳值的解釋) ex:GeneralGame的play(),0
+假如打錯，應要重新讓使用者輸入三個,0
+好像用不到，目前,0
+4,1
+沒問題，但intelliJ不能跑,0
+還能訂正：else要緊跟在if}後面,0
+跟上次一樣，檔案開啟裡面除了助教他們預設的東西，沒有其他程式碼,0
+有達成要求,1
+有的有的~符合,1
+第一題沒有輸出,0
+應該使用/* 不是// 而且每個方法都該寫javadoc,0
+讚讚讚,1
+Good 方法命名符合標準,0
+未完成,1
+是是,1
+符合，很棒,1
+"compare方法中，系統生成之手勢與使用者輸入之手勢相比較之後結果要使用字串陣列保存
+且開始程式的第一次提示不是re-enter而是enter",0
+應該是用switch判斷成績，而不是先用if判斷，程式執行效率可能有差,0
+沒寫所以很整齊,1
+要印出“Hello ANDY !”，不是HelloANDY!,0
+有提示輸入型態 讚,0
+"是,完全符合助教要求",0
+宣告變數後有對變數做初始化,0
+排版整齊但不符合google checkstyle規範,0
+Cake and readycake 建構子，return等沒有註解,0
+compare方法沒有將比較結果輸入字串陣列中。,0
+變數k要有意義的命名,0
+"main 缺少JavaDoc 
+JavaDoc 應該使用中文寫",0
+只有Main有Javadoc,0
+寫得很好,1
+記得寫作業喔,0
+Perfect !,1
+"讚讚
+",1
+撰寫的讓人容易理解,0
+"good
+",1
+"縮進符寫錯了，應該改成tab size:2, indent:2, continuation indent:4",0
+題目輸出符合要求,0
+"是  非常好
+輸入輸出都非常詳細
+看起來很舒服",0
+getInfo沒有將此方法定義為 無法覆寫(override) 的方法。其他沒問題,0
+Nothing changed,1
+沒有符合 google style,0
+有符合JavaDoc規範,0
+是的,1
+Main裡的flag2沒有初始化。,0
+印出Hello World!  少印出了!,0
+GeneralGame.java 缺少javadoc,0
+"平均值計算錯誤
+",0
+win跟lose完還要一行gameover,0
+對的~,1
+是，你超棒！,1
+超乾淨,1
+輸出缺少Game over.,0
+這次似乎不需要？,1
+平手的輸出是Game tie唷!,0
+grade沒有初始化,0
+Good Job.,1
+棒!,1
+"沒有印到""!""",0
+GeneralGame中第10行和PlayGenerator中的第7行的註解應該要縮進兩格,0
+compare方法沒有將比較結果輸入字串陣列中。startGame方法中的switch沒加break和default導致輸到sArray的值都是Gesture.scissors以至於不會隨機。,0
+是，乾淨,1
+有符合要求,0
+很棒 作業有更正了 超棒!!!,0
+是，經由javadoc檢查後無異樣,0
+是，經由checkstyle檢查後無異狀,0
+有欸你好棒,1
+符合符合~,1
+改得很棒,0
+Student.java 沒打javadoc註解,0
+沒寫到,1
+否，Main檔中的大括號與大括號間有多個空行應去除。,0
+好啦,1
+空白的檔案,0
+student那個檔案有很多錯的,0
+輸入3個得遊戲的結果，贏的時候不會停止，平手不讓人再輸入一次，輸入5個得遊戲的結果，有一個結果不會顯示,0
+排版很整齊,0
+"少@param args input
+然後，JavaDoc每一行都要.(句號)除了上面那句",0
+string陣列未初始化,0
+是 ，整齊，但tab不符合規範,0
+無作業,1
+"	
+如果蛋糕名稱含有空格，例如: 水果布丁蛋糕(Fruit(空格)pudding)，那會造成名字只讀到fruit，然後rate會讀到""pudding""，就會造成錯誤；或者是輸入像是cake(空格)1 ，會造成該蛋糕的rate無法讀取，程式直接跳過，跑去讀取weight或quanity。所以在讀取name的時候要用nextline()來避免輸入的名稱含有空格。而造成rate無法讀取的狀況則是要透過在你輸入完weight或quanity之後多加一行scan.nextLine()來避免跳過讀取的部分",0
+有排版,1
+否，Student檔裡的每個set和get前都要加上JavaDoc喔，但該程式裡面只有set有JavaDoc。,0
+是，很好。,1
+GeneralGame.java 中的 play() ，javadoc 少了 @param 傳入值的解釋 (但其他的都有加),0
+google check不行,0
+有輸入不在範圍的值的話，在print的時候就會有問題。,0
+"第一題：
+google check回傳：' , ' is not follow by white space.
+-> 括號中逗號後要有一個空白
+String replaced1 = name.replace(""n"",""N"");
+String replaced2 = replaced1.replace(""d"",""D"");
+String replaced3 = replaced2.replace(""y"",""Y"");
+
+第二題：
+-> identation 錯誤, 應為2格, 你的為4格
+-> class沒javadoc
+-> method的javadoc第一行敘述後沒有句號
+-> 參數逗號後要空一格
+-> '+' 前要空一格
+",0
+"""METHOD_DEF""前應該要有一個空白行。(30:3)",0
+Game over.後須加上換行符號,0
+還是讚！,1
+下次記得Input high speed rail conductorname: 用print就好，不需要println換行喔,0
+作業未上傳,0
+是 達到撰寫標準,0
+畢竟Demo Code是正確的,0
+沒有hello world,0
+完美!,1
+沒有push 到檔案喔,0
+第一個(Greet)沒有JavaDoc,0
+輸出完全正確,0
+符合規格,0
+沒使用,1
+第4、8行需與第10行格式一致，*後須先空一格再繼續打字，推薦可使用Ctrl+Alt+L排版,0
+變數沒初始化到喔,0
+輸入為無效成績後，應讓使用者繼續輸入直到五次成功輸入,0
+JavaDoc編寫完善,0
+棒棒！,1
+沒有print出結果,0
+"General game裡的 if (gestures[i] == g) 應改為if (gestures[i] != g) 才正確
+",0
+是的，讚啦,1
+可以印出Hello World!字樣,0
+main 的 out 沒初始化,0
+否，縮排要用兩個空格而非tab。,0
+都有達到老師題目的要求 很棒:D!!,0
+下次要記得寫，main與程式都要各一個,0
+"打stone都game tie並非隨機gesture
+",0
+"沒有寫JavaDoc喔
+",0
+做得好,1
+"是,簡潔明瞭",1
+輸出那邊沒有縮排到喔,0
+成績輸入後不須印出成績 輸出格式不符,0
+測試用輸出可以刪除,0
+是的，符合標準。,0
+沒有符合,1
+符合(題目沒說結果要整數，為甚麼要轉型阿 ?),0
+Student那個檔案沒寫JavaDoc,0
+JavaDoc位置錯誤 應在public前面 放後面不符合Google checkstyle,0
+猜拳的部分有錯，AdvancedGame.java 跟 GeneralGame.java 裡有自己跟自己比較的條件式,0
+很符合,1
+有印出要求，讚,0
+"Student.java的第3~7行沒有進行變數初始化。
+第七行：雖然方法命名可以用大寫的BMI，但變數名稱還是要用小寫(有問過老師)。",0
+蠻整齊的,1
+"是，非常遺憾的我的眼睛不好，剛好沒注意到你的""Hello ANDY!""驚嘆號前忘記加空格了。
+但我也是真不知道這有沒有必要改對還是錯，有異議就去問老師，我不是老師我不會改。",0
+全部檔案完全空白，似乎沒有push上來,0
+結果有符合題目需求,0
+牛逼 666,1
+"
+JavaDoc有符合規範，能理解該類別或該方法的規格",0
+class Main裡面的JavaDoc不完整,0
+public String play(Gesture[] user)方法要寫 user是什麼還有return的東西 還有其他的方法也是,0
+main method 的 Java Doc 缺少輸入變數解釋,0
+非常非常棒棒棒，有符合題目的要求輸出,0
+有些沒有初始化,0
+沒完成,1
+大於101不能輸入,0
+排版未符合google規範，用點天賜的智力,0
+很棒 都有符合標準,0
+類別命名符合,0
+有哩！,1
+"沒有用到javaDoc
+",0
+很清楚,1
+輸入局數錯誤時，文字給定錯誤以及Game Tie判斷錯誤,0
+Marry的體重超過300，沒有給體重無效資訊,0
+很棒 排版非常整齊,0
+Well!!!,1
+OH YEAH!,1
+PAAAAAAAAAAS,1
+"Name ： 
+Age ：
+BMI :
+定義的詞跟：前面全部都有空格，我猜可能是中文的：跟英文的:的佔的空間不同的關係
+其他都是對的哦
+",0
+我理解！,1
+程式碼清晰簡潔有力,0
+"GeneralGame.java的第4行""{""前需加一個空格，請使用CheckStyle確認。",0
+JavaDoc有符合規範，能理解該類別或該方法的規格,0
+程式碼清晰簡潔有力，還有貼心的註解,0
+Checkstydle未通過,0
+給過 太狠了,1
+是，類別命名符合要求,0
+無告知輸入是ReadyMadeCake還是OrderCake,0
+第1題的main上面沒有@param args的註解,0
+輸入無效成績 還會輸出 F,0
+lotteryNumbers=5不是6,0
+"整齊，但不符合Google規範
+TAB須改用space*2",0
+main.java裹的縮進符要記得改喔,0
+是，很完整,1
+很棒。,1
+"整齊，但會建議初始化跟迴圈之類的程式碼之間多一個換行，看起來才不會太擠
+",0
+完全沒寫,1
+完美 !!!,1
+scanner.close();,0
+三個檔案都空白,0
+符合規範，寫得很清楚,0
+"Total price of all cakes:6.460000000000001
+顯然有問題",0
+還是	讚！,1
+符合撰寫標準喔,0
+"(3 or 5)這邊多打了一個t, please enter your gesture. 不是 : 結尾, 當game tie 時, 不需重新輸入3 or 5, 而是直接重新輸入三個手勢",0
+"否，Cake檔裡面的name, rate均未作初始化。",0
+兩題都沒有撰寫JavaDoc喔,0
+否，BMI在某些數字狀況下會輸出Infinity，BMI計算可能有問題,0
+超棒,1
+你沒有print game over,0
+否，缺少Javadco,0
+setNameandAge......,1
+是。畢竟沒變數。,0
+compare(Gesture[] arrayPlayer)的JAVADoc要@param,0
+??,1
+是，輸出完全符合要求,0
+"若使用者贏得比賽的次數大於輸掉比賽的次數則回傳 “You win!”，不是""win""、等於則回傳 “Game tie”，不是""tie""、小於回傳 “You lose!”，不是""lose""
+
+題目要求輸出play()的回傳結果要在Main裡，不是在AdvancedGame/GeneralGame裡",0
+還可以手動輸入城市和人口 非常棒,0
+是的，符合題目要求。,0
+"否，若回合輸入錯誤(不是3或5)的時候，除了""Please re-enter game count.(3 or 5)""的字樣以外，""Please enter game count.(3 or 5)""的字樣也會再一次被印出來。",0
+empty,1
+是，排列整齊，能夠理解,0
+有！簡潔明瞭！,1
+程式碼應加上註解,0
+這題好像不需要,0
+是，很棒喔,1
+"第一個作業是要輸出 ""Hello ANDY!""  少輸出了 "" """,0
+yse,1
+Game tie要重複玩遊戲直到分出勝負,0
+"否，Main中(74:36) ','後要空格、OrderCake(1:36) '{ ' 前要空格、ReadyMadeCake(1:40) '{ ' 前要空格",0
+輸入-5後會直接輸出平均，結束程式，應該要讓使用者重新輸入成績。,0
+有按照要求,0
+清晰易懂,1
+一開始沒有文字顯示要幾局,0
+題目要求compare要回傳是String[] 而不是String,0
+否，並沒有輸入Java Doc,0
+作業未完成,0
+沒做完,1
+乾淨整潔,1
+第一個作業的 uppercase 要改成 upperCase,0
+沒有符合題目要求，內容空白,0
+符合變數的命名標準,0
+跟助教不同，用了Math.round很獨特,0
+是，方便閱讀,0
+不符合Google Checkstyle,0
+"The programm will error when I input 4 as game count twice.
+",0
+請使用space代替tab,0
+"上面的Javadoc似乎想打雙引號 "" "" ，但你打成 : "" 了喔。",0
+雖然有多餘的程式碼就是了,0
+可印出Hello Word!,0
+應讀入三個手勢後，再輸出勝負,0
+兩題的main的JavaDoc放錯位置,0
+空白檔案,1
+完美,1
+"是,完全符合google java checks的要求",0
+BMI只取到小數點第二位,0
+Good~,1
+輸入為無效數後，除了要印出請重新輸入還要重複印出上一段的文字 (抱歉，上次沒檢查到),0
+" * @param name input parameters.
+ * @param age input parameters.
+ * @param height input parameters.
+ * @param weight input parameters.
+public Student(String name, int age, double height, double weight)
+每一個public只要有輸入或return都要記得JavaDoc
+ * @param return name
+ public String getName() {
+    return name;
+  }
+",0
+gd,1
+非常整齊,1
+變數沒有初始化,0
+超超超詳細!!!,1
+double初始值為0.0,0
+Game.java中的第41、42行之間需多加一個空行，請利用CheckStyle確認。,0
+都符合,1
+中規中矩，符合作業要求,0
+"很棒
+",1
+隨機抽到的號碼沒有由小到大排序再印出,0
+沒東西,0
+Average沒辦法輸出float,0
+沒有寫QQ,1
+Gesture.java 與Game.java 中有很多項未符合Google check style,0
+"變數命名正確
+",0
+"Output need to be quoted by """"",0
+符合題意 真的很棒:),0
+Nice!!!,1
+Pass,1
+漂亮,1
+程式含有tab,0
+是，題目輸出符合要求,0
+"white
+",1
+不符合google checks,0
+中規中矩，細節拉滿,0
+Game.java裡面有方法前面沒有空行喔,0
+都有符合題目要求,0
+題目沒有說TAXI TRAIN TRANSPORTATION 要SETTER 請你修正!!!,0
+rate不能輸入小數點,0
+可以用print就好不用printf,0
+程式碼空白,0
+符合標準，很好,0
+沒有給初始值,0
+第一個無法執行 第二個是空的,0
+class PlayGenerator 不符合 javadoc,0
+平均值輸出應為小數點後兩位(包括小數點後第二位為0時)，請見作業輸出範例。,0
+"輸入身高體重要位於1~300 所以判斷式 應該是 if(height<1||height>300)
+我輸入0 沒有判斷重新輸入",0
+score average沒初始化,0
+GeneralGame沒有寫java doc,0
+感覺不要偷懶用HSR比較好,0
+很好!讚,1
+"第52行，類型轉換後應有空格
+需寫為 avg = (double) sum / 5;",0
+"第二題：等號和小於前後應加空格、分號和逗號後面應加空格、for和if後面應加空格、if需用大括號將內容括起、大括號與小括號之間應有空格、變數index,reaplaced聲明和第一次使用距離太多行。 
+繳交前可以先用CheckStyle確認。",0
+棒~,1
+"記得加上註
+輸出文字應更加清楚",0
+少一個驚嘆號，下一次注意一點,0
+有符合標準,0
+應使用space取代tab,0
+程式碼為空,0
+空白的,1
+很神奇地合乎規格...,1
+getBMI這個命名有問題 不能有連續大寫字母,0
+"空的
+",1
+"
+Game tie 會直接結束",0
+有寫,1
+沒有使用到註解!,0
+"遊戲結果的判斷是依據三場的勝負決定，
+目前的寫法依舊是判斷最後一場，
+可以把程式碼改成讀取完三筆正確輸入，
+再將array 傳入compare function，
+這樣也不會有i 小於0而出現""java.lang.ArrayIndexOutOfBoundsException""的錯誤，
+在compare function 裡面寫個for 迴圈就可以了。
+至於Game tie 之後應該要再印出""Please enter the gesture""，
+可以嘗試用do...while 來解決。 加油dowob",0
+switch 沒有寫default，有在google check中顯示。,0
+整齊且乾淨,1
+"沒有用random
+",0
+沒有像我忘記訂正，做得好java人,1
+Good 符合,1
+內容空白無法判斷,0
+排版整齊，但不符合Google Checks的設定,0
+Gesture enum沒有Javadoc,0
+gesture.java 沒有做java doc,0
+有通過checkstyle檢查,0
+很棒 排版很整齊,0
+ordercake跟readycake那邊少個javadoc,0
+"""隨機生成 5 個 Cake 物件並要求使用者輸入該物件所需資料，並放入 Array 中
+隨機生成的物件可以是 OrderCake 或 ReadyMadeCake""這項沒符合，你要求4項全部都要輸入",0
+有欸！雖然沒有變數XD,0
+"是
+
+
+",1
+連印出Hello World! 都沒辦法,0
+有有有,1
+有喔 符合標準喔,0
+排版整齊，容易閱讀,0
+方法命名符合標準,0
+"沒問題，但第二題印出computer能寫sentence.substring(28, 36)",0
+整齊，switch中的case10和case9內容是相同的，建議可以合併,0
+"Exception in thread ""main"" java.util.InputMismatchException
+        at java.base/java.util.Scanner.throwFor(Scanner.java:947)
+        at java.base/java.util.Scanner.next(Scanner.java:1602)
+        at java.base/java.util.Scanner.nextInt(Scanner.java:2267)
+        at java.base/java.util.Scanner.nextInt(Scanner.java:2221)
+        at Main.main(Main.java:31)
+錯誤，你可能要改next();",0
+"Good!
+",1
+照題目所述，當遇上輸入的Gestrue不符合時，一樣要吃到之前輸入正確的Gestrue，而不是直接重算,0
+完全正確,0
+可以，NotLucky~,1
+縮排格式有誤，不是4格，應為2格,0
+本次無變數使用,0
+是 但可以再寫得更加詳細一點,0
+遊戲結束少印出 Game over.,0
+開頭無詢問局數文字,0
+縮排設定好像還沒設定好(右下角的2 SPACE)，但有符合224的縮排規定,0
+比賽結果判斷不對。輸出在錯誤的地方。,0
+超讚,1
+?,1
+否,1
+作業未完成 main檔錯誤無法執行,0
+一開始作業就有命名,0
+排版整齊，清楚明瞭,0
+是。畢竟這次沒變數。,1
+42行最後有一個「type」導致程式碼跑不動,0
+排版整齊，且有符合Google Style,0
+第13 & 15行沒有對變數進行初始化。,0
+很棒 註解都符合規範,0
+是，變數命名符合要求,0
+沒錯,1
+EXCELLENT !!!,1
+ReadyMadeCake計算有問題，1.4x3=4.2，但輸出4.19999...,0
+"是, what a fucking good code!",1
+沒有setName()、setAge()、getHeight() 和 getWeight()，雖然用不到，但題目有要求ㄛ,0
+totalNumbers >= lotteryNumbers 應該都要可以生成號碼,0
+Tom不用輸入數值 要自己預設好,0
+優秀,1
+main的weight應該是要用double輸入,0
+是的，讚,1
+這題不需要,1
+Main.java 第26行，input需初始化,0
+"輸入無效的身高/體重時，缺少提示訊息""請輸入某人的身高/體重 ""和標點符號。",0
+寫得很清楚，推推,1
+有符合Google Style,0
+有印出指定的要求,0
+否，沒有輸入javadoc,0
+有完成,1
+優質,1
+局數如果不是3或5 會跑出re-enter 跟 enter,0
+中規中矩，做得符合作業要求,0
+"輸入第二或三個錯誤手勢時，須接著輸入，而非全部重新輸入，且顯示""Please re-enter the gesture""時，下一行不應再顯示Please enter your gesture.",0
+Cake.java中的calcPrice()、getName()、getRate()、toString()及OrderCake.java中的CalcPrice()，以及ReadyMadeCake.java中的CalcPrice()都請加上javadoc,0
+空格 空行 不符 Google checkstyle 規定,0
+Main的Class沒辦法偵測,0
+"I think you misunderstand what does initialize with constructor mean.
+As your sameple data allInput , it should be `new Student(""Tom"" , 18 , 162.4 , 70.5)`.
+I think it has been explained clearly on Page.22 of `Defining Class 2`.",0
+Game.java switch沒有定義default,0
+少了JavaDoc,0
+很棒，完美!,1
+空,1
+是的~~,1
+是 達到符合javadoc標準,0
+PlayGenerator中的printGest和transS2G不符合命名標準，要以完整的單字組合成,0
