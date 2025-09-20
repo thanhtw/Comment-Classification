@@ -2,7 +2,7 @@
 
 ## Experiment Overview
 
-**Experiment Date**: 2025-09-20 22:24:13  
+**Experiment Date**: 2025-09-20 22:57:43  
 **Task**: Binary Text Classification for Chinese Text  
 **Dataset Size**: 2348 samples  
 **Models Compared**: BERT-Chinese vs RoBERTa-Chinese  
@@ -69,15 +69,15 @@ Architecture: Optimized BERT (No NSP)
 | Metric | BERT-Chinese | RoBERTa-Chinese | Difference |
 |--------|--------------|-----------------|------------|
 | **Accuracy** | 0.9468 | 0.9489 | +0.0021 |
-| **Precision** | 0.9463 | 0.9489 | +0.0026 |
+| **Precision** | 0.9464 | 0.9489 | +0.0026 |
 | **Recall** | 0.9468 | 0.9489 | +0.0021 |
-| **F1-Score** | 0.9463 | 0.9489 | +0.0026 |
+| **F1-Score** | 0.9464 | 0.9489 | +0.0025 |
 
 ### Model Performance Analysis
 
 **Best Performing Model**: RoBERTa-Chinese  
 **Best F1-Score**: 0.9489  
-**Performance Gap**: 0.0026 F1 points  
+**Performance Gap**: 0.0025 F1 points  
 
 ## Detailed Analysis
 
@@ -85,12 +85,12 @@ Architecture: Optimized BERT (No NSP)
 
 
 #### BERT-Chinese
-- **True Positives**: 107
-- **True Negatives**: 338
-- **False Positives**: 9
-- **False Negatives**: 16
-- **Sensitivity (Recall)**: 0.8699
-- **Specificity**: 0.9741
+- **True Positives**: 108
+- **True Negatives**: 337
+- **False Positives**: 10
+- **False Negatives**: 15
+- **Sensitivity (Recall)**: 0.8780
+- **Specificity**: 0.9712
 
 #### RoBERTa-Chinese
 - **True Positives**: 111
@@ -111,7 +111,7 @@ The weighted loss function successfully addressed the class imbalance:
 
 ### Performance Insights
 1. **Overall Winner**: RoBERTa-Chinese demonstrates superior performance
-2. **Performance Gap**: 0.0026 F1-score difference
+2. **Performance Gap**: 0.0025 F1-score difference
 3. **Consistency**: Both models show stable performance
 4. **Class Balance**: Weighted loss effectively handles imbalance
 
@@ -217,5 +217,5 @@ The methodology and results provide a solid foundation for production model sele
 
 ---
 
-*Report generated automatically on 2025-09-20 22:24:13*  
+*Report generated automatically on 2025-09-20 22:57:43*  
 *Experiment completed successfully with comprehensive model comparison*

@@ -263,7 +263,7 @@ for i, metric in enumerate(metrics):
     for bar in bars:
         height = bar.get_height()
         ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                f'{height:.3f}', ha='center', va='bottom')
+                f'{height:.4f}', ha='center', va='bottom')
 
 plt.tight_layout()
 plt.savefig('model_comparison.png', dpi=300, bbox_inches='tight')
