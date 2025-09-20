@@ -2,7 +2,7 @@
 
 ## Experiment Overview
 
-**Experiment Date**: 2025-09-20T22:31:04 to 2025-09-20T22:31:34  
+**Experiment Date**: 2025-09-20T22:55:13 to 2025-09-20T22:55:44  
 **Task**: Binary Text Classification for Chinese Text  
 **Dataset Size**: 2348 samples, 3 features  
 **Vocabulary Size**: 1496 unique tokens  
@@ -81,14 +81,14 @@ Estimated Parameters: ~200,928
 
 | Fold | Accuracy | Precision | Recall | F1 Score | Inference Time (s) | GPU Memory (GB) |
 |------|----------|-----------|--------|----------|-------------------|-----------------|
-| 1 | 0.2468 | 0.0000 | 0.0000 | 0.0000 | 0.0088 | 0.2053 |
-| 2 | 0.9447 | 0.9816 | 0.9412 | 0.9610 | 0.0088 | 0.2045 |
+| 1 | 0.2468 | 0.0000 | 0.0000 | 0.0000 | 0.0089 | 0.2053 |
+| 2 | 0.9447 | 0.9816 | 0.9412 | 0.9610 | 0.0087 | 0.2045 |
 | 3 | 0.9106 | 0.9682 | 0.9048 | 0.9354 | 0.0087 | 0.2045 |
 | 4 | 0.9191 | 0.9551 | 0.9255 | 0.9401 | 0.0088 | 0.2045 |
 | 5 | 0.9149 | 0.9649 | 0.9218 | 0.9429 | 0.0087 | 0.2045 |
 | 6 | 0.9319 | 0.9826 | 0.9286 | 0.9548 | 0.0088 | 0.2045 |
 | 7 | 0.8979 | 0.9702 | 0.8956 | 0.9314 | 0.0088 | 0.2045 |
-| 8 | 0.9319 | 0.9821 | 0.9270 | 0.9538 | 0.0088 | 0.2045 |
+| 8 | 0.9319 | 0.9821 | 0.9270 | 0.9538 | 0.0087 | 0.2045 |
 | 9 | 0.9060 | 0.9576 | 0.9133 | 0.9349 | 0.0087 | 0.2045 |
 | 10 | 0.9487 | 0.9677 | 0.9677 | 0.9677 | 0.0088 | 0.2045 |
 
@@ -105,7 +105,7 @@ Estimated Parameters: ~200,928
 | 7 | 0.9191 | 0.9657 | 0.9286 | 0.9468 | 0.0054 | 0.2045 |
 | 8 | 0.9447 | 0.9714 | 0.9551 | 0.9632 | 0.0054 | 0.2045 |
 | 9 | 0.9103 | 0.9524 | 0.9249 | 0.9384 | 0.0054 | 0.2045 |
-| 10 | 0.9444 | 0.9482 | 0.9839 | 0.9657 | 0.0054 | 0.2045 |
+| 10 | 0.9444 | 0.9482 | 0.9839 | 0.9657 | 0.0056 | 0.2045 |
 
 ## Key Findings
 
@@ -188,20 +188,20 @@ Estimated Parameters: ~200,928
 Total logged events: 276
 
 ### Key Milestones
-- [2025-09-20 22:31:04] INFO: === LSTM vs BiLSTM Comparison Experiment ===
-- [2025-09-20 22:31:04] INFO: Starting data loading and cleaning...
-- [2025-09-20 22:31:04] INFO: Successfully loaded data with utf-8 encoding
-- [2025-09-20 22:31:04] INFO: Data columns: ['text', 'label']
-- [2025-09-20 22:31:04] INFO: Initial data shape: (2348, 2)
-- [2025-09-20 22:31:04] INFO: Removed 0 empty text entries
-- [2025-09-20 22:31:04] INFO: Unique labels found: [0, 1]
-- [2025-09-20 22:31:04] INFO: Class distribution:
+- [2025-09-20 22:55:13] INFO: === LSTM vs BiLSTM Comparison Experiment ===
+- [2025-09-20 22:55:13] INFO: Starting data loading and cleaning...
+- [2025-09-20 22:55:13] INFO: Successfully loaded data with utf-8 encoding
+- [2025-09-20 22:55:13] INFO: Data columns: ['text', 'label']
+- [2025-09-20 22:55:13] INFO: Initial data shape: (2348, 2)
+- [2025-09-20 22:55:13] INFO: Removed 0 empty text entries
+- [2025-09-20 22:55:13] INFO: Unique labels found: [0, 1]
+- [2025-09-20 22:55:13] INFO: Class distribution:
 label
 0     592
 1    1756
 Name: count, dtype: int64
-- [2025-09-20 22:31:04] INFO: Class imbalance ratio: 2.97
-- [2025-09-20 22:31:04] INFO: Final cleaned data shape: (2348, 2)
+- [2025-09-20 22:55:13] INFO: Class imbalance ratio: 2.97
+- [2025-09-20 22:55:13] INFO: Final cleaned data shape: (2348, 2)
 - ... and 266 more entries
 
 
@@ -213,4 +213,4 @@ The choice between these architectures should be guided by specific project requ
 
 ---
 
-*Report generated automatically on 2025-09-20 22:31:34*
+*Report generated automatically on 2025-09-20 22:55:44*

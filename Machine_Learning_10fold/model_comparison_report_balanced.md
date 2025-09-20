@@ -37,9 +37,9 @@ This report presents a comprehensive comparison of three machine learning models
 
 | Model | Accuracy | Precision | Recall | F1-Score | ROC AUC | Inference Time (s) |
 |-------|----------|-----------|--------|----------|---------|-------------------|
-| SVM | 0.919 | 0.956 | 0.936 | 0.946 | 0.950 | 0.0212 |
+| SVM | 0.919 | 0.956 | 0.936 | 0.946 | 0.950 | 0.0199 |
 | Naive_Bayes | 0.892 | 0.962 | 0.891 | 0.925 | 0.929 | 0.0003 |
-| Random_Forest | 0.899 | 0.963 | 0.900 | 0.930 | 0.964 | 0.0394 |
+| Random_Forest | 0.899 | 0.963 | 0.900 | 0.930 | 0.964 | 0.0440 |
 
 ### Best Performing Models by Metric (Class Balanced)
 
@@ -82,7 +82,7 @@ This report presents a comprehensive comparison of three machine learning models
 
 
 - **Fastest Model**: Naive_Bayes (0.0003s per batch)
-- **Highest Throughput**: Naive_Bayes (874805 samples/second)
+- **Highest Throughput**: Naive_Bayes (855035 samples/second)
 - **Class Balancing Overhead**: Minimal additional computational cost
 
 ## Recommendations for Educational Context
