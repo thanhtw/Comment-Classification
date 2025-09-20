@@ -15,7 +15,12 @@ import pickle
 from collections import Counter
 import re
 from imblearn.over_sampling import SMOTE
+import logging
 #warnings.filterwarnings('ignore')
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # 設定隨機種子確保結果可重現
 random.seed(42)
@@ -28,26 +33,56 @@ if torch.cuda.is_available():
 
 # 1. 資料清理，已手動檢查過原始資料
 def load_and_clean_data(path):
-    data = pd.read_csv(path, encoding='utf-8')
-
-    nan_rows = data[data.isna().any(axis=1)]
-    if not nan_rows.empty:  
-        print("下列資料含有 NaN，請檢查：")
-        print(nan_rows.to_string(index=True))
-    else:
-        print("資料中沒有含 NaN 的列。")
-    # 強化清理流程
-    data['text'] = data['text'].apply(
-        lambda x: str(x).replace('\n', ' ').replace('\r', '').strip() 
-        if pd.notna(x) else ""
-    )
-    data = data[data['text'] != '']  # 移除空文字
+    """
+    Load and clean the dataset with proper CSV parsing.
+    
+    Args:
+        path: Path to the CSV file
+        
+    Returns:
+        Cleaned DataFrame
+    """
+    logger.info("Loading and cleaning data...")
+    
+    try:
+        data = pd.read_csv(path, encoding='utf-8', quotechar='"', skipinitialspace=True)
+    except Exception as e:
+        logger.warning(f"Standard CSV reading failed: {e}")
+        data = pd.read_csv(path, encoding='utf-8', quotechar='"', 
+                          skipinitialspace=True, on_bad_lines='skip')
+    
+    logger.info(f"Data columns: {list(data.columns)}")
+    logger.info(f"Data shape: {data.shape}")
+    
+    # Clean text column
+    if 'text' in data.columns:
+        data['text'] = data['text'].apply(
+            lambda x: str(x).replace('\n', ' ').replace('\r', ' ').strip() 
+            if pd.notna(x) else ""
+        )
+        data = data[data['text'] != '']
+    
+    # Clean label column
+    if 'label' in data.columns:
+        data['label'] = pd.to_numeric(data['label'], errors='coerce')
+        data = data.dropna(subset=['label'])
+        data['label'] = data['label'].astype(int)
+        
+        unique_labels = data['label'].unique()
+        logger.info(f"Unique labels found: {sorted(unique_labels)}")
+        
+        valid_labels = data['label'].isin([0, 1])
+        if not valid_labels.all():
+            logger.warning(f"Found invalid labels. Keeping only 0 and 1.")
+            data = data[valid_labels]
+    
+    logger.info(f"Final cleaned data shape: {data.shape}")
     return data
 
-data = load_and_clean_data('../data/cleaned_3label_data.csv') 
-assert data.isna().sum().sum() == 0, "data存在未處理的 NaN！"
-for col in ['relevance', 'concreteness', 'constructive']:
-    data[col] = data[col].astype(int)
+data = load_and_clean_data('../data/two-label-data.csv') 
+# assert data.isna().sum().sum() == 0, "data存在未處理的 NaN！"
+# for col in ['relevance', 'concreteness', 'constructive']:
+#     data[col] = data[col].astype(int)
 
 # 2. 中文文本預處理
 def preprocess_chinese_text(text):
@@ -59,7 +94,7 @@ print("開始文本預處理...")
 data['processed_text'] = data['text'].apply(preprocess_chinese_text)
 print("文本預處理完成")
 
-labels = data[['relevance', 'concreteness', 'constructive']].values
+labels = data['label'].values
 
 # 3. 構建詞彙表和詞向量
 def build_vocab(texts, min_freq=2):
