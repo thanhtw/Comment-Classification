@@ -1,0 +1,11 @@
+# Generated outputs
+results/
+
+# Environment secrets
+.env
+
+# Cache directories
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.cache/

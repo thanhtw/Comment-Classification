@@ -2,15 +2,47 @@ import argparse
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
+
+
+STEP_ORDER = ["machine-learning", "deep-learning", "transformer"]
+SECTION_WIDTH = 80
+
+
+@dataclass(frozen=True)
+class PipelineStep:
+    name: str
+    script_path: Path
+
+
+def _print_section_header(name: str, script_path: Path) -> None:
+    print("\n" + "=" * SECTION_WIDTH)
+    print(f"STEP: {name}")
+    print(f"SCRIPT: {script_path}")
+    print("=" * SECTION_WIDTH)
+
+
+def _build_steps(project_root: Path) -> dict[str, PipelineStep]:
+    return {
+        "machine-learning": PipelineStep(
+            name="Machine Learning",
+            script_path=project_root / "src" / "models" / "machine_learning_pipeline.py",
+        ),
+        "deep-learning": PipelineStep(
+            name="Deep Learning",
+            script_path=project_root / "src" / "models" / "deep_learning_pipeline.py",
+        ),
+        "transformer": PipelineStep(
+            name="Transformer",
+            script_path=project_root / "src" / "models" / "transformer_pipeline.py",
+        ),
+    }
 
 
 def run_step(name: str, script_path: Path) -> int:
     """Run one pipeline script and return its exit code."""
-    print("\n" + "=" * 80)
-    print(f"STEP: {name}")
-    print(f"SCRIPT: {script_path}")
-    print("=" * 80)
+    _print_section_header(name, script_path)
 
     if not script_path.exists():
         print(f"[ERROR] Script not found: {script_path}")
@@ -38,28 +70,33 @@ def main() -> int:
         action="store_true",
         help="Continue running remaining steps even if one step fails.",
     )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        choices=["machine-learning", "deep-learning", "transformer"],
+        help="Run only selected pipeline step(s).",
+    )
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
-    steps = [
-        ("Machine Learning", project_root / "Machine_Learning_10fold" / "machine-learning.py"),
-        ("Deep Learning", project_root / "DeepLearning_10fold" / "LSTMvsBiLSTM.py"),
-        ("Transformer", project_root / "Transformer_10fold" / "BertvsRoberta.py"),
-    ]
+    all_steps = _build_steps(project_root)
+
+    selected_keys = args.only if args.only else STEP_ORDER
+    steps = [all_steps[key] for key in selected_keys]
 
     overall_start = time.perf_counter()
     failed = []
 
-    for name, script in steps:
-        code = run_step(name, script)
+    for step in steps:
+        code = run_step(step.name, step.script_path)
         if code != 0:
-            failed.append((name, code))
+            failed.append((step.name, code))
             if not args.continue_on_error:
                 print("\nStopping because a step failed. Use --continue-on-error to keep going.")
                 break
 
     total_elapsed = time.perf_counter() - overall_start
-    print("\n" + "-" * 80)
+    print("\n" + "-" * SECTION_WIDTH)
     print(f"Total elapsed time: {total_elapsed:.2f}s")
 
     if failed:
