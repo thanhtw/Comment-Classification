@@ -804,9 +804,9 @@ def plot_smote_before_after(y_before, y_after, output_path='./smote_before_after
     """Plot class distribution before and after SMOTE to show balancing effect."""
     set_publication_style()
     class_order = [0, 1]
-    class_labels = ['0: No-Meaningful', '1: Meaningful']
+    class_labels = ['No-Meaningful', 'Meaningful']
     # Professional, colorblind-friendly pair (blue/orange).
-    class_colors = ['#4C78A8', '#F58518']
+    class_colors = ['#4C78A8', "#92673C"]
 
     before_counts = pd.Series(y_before).value_counts().reindex(class_order, fill_value=0)
     after_counts = pd.Series(y_after).value_counts().reindex(class_order, fill_value=0)
