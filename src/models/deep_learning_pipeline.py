@@ -1,26 +1,53 @@
-import pandas as pd
+"""Deep learning pipeline for binary text classification using LSTM/BiLSTM.
+
+This module implements:
+- 10-fold stratified cross-validation
+- LSTM and BiLSTM model architectures
+- Class weight balancing and attention mechanisms  
+- Best-fold selection and comprehensive reporting
+- Publication-quality visualizations
+"""
+
+import json
+import logging
+import os
+import sys
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+import jieba
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import pickle
+import random
+import re
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import time
-import random
-import matplotlib.pyplot as plt
+import warnings
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import Dataset, DataLoader
-import warnings
-import jieba
-import pickle
-from collections import Counter
-import re
-import logging
-from datetime import datetime
-import os
-import json
-from sklearn.model_selection import train_test_split
-from pathlib import Path
+
+# Import professional figure utilities
+from src.utils.figure_utils import (
+    export_fold_metrics_csv,
+    plot_fold_metrics_comparison,
+    plot_metrics_panel,
+    plot_loss_comparison,
+    plot_model_comparison_bar,
+    setup_professional_style,
+    save_figure_multi_format
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -516,15 +543,15 @@ def main():
             log_to_report(f"Error computing class weights: {e}", "WARNING")
             class_weight_ratio = 1.0
         
-        # Cross-validation setup
-        kf = KFold(n_splits=num_folds, shuffle=True, random_state=42)
+        # Cross-validation setup (stratified to preserve class ratio in each fold)
+        kf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=42)
         bilstm_results = []
         lstm_results = []
         training_records = []
         
         log_to_report(f"Starting {num_folds}-fold cross-validation...")
         
-        for fold, (train_idx, val_idx) in enumerate(kf.split(train_sequences_all)):
+        for fold, (train_idx, val_idx) in enumerate(kf.split(train_sequences_all, train_labels_all)):
             log_to_report(f"\n{'='*50}")
             log_to_report(f"FOLD {fold+1}/{num_folds}")
             log_to_report(f"{'='*50}")
@@ -805,6 +832,38 @@ def main():
             }
         }
 
+        # Standardized best-fold summary for cross-pipeline comparison.
+        best_bilstm = max(bilstm_results, key=lambda r: r['f1_score'])
+        best_lstm = max(lstm_results, key=lambda r: r['f1_score'])
+        best_fold_summary = {
+            'BiLSTM': {
+                'pipeline': 'deep_learning',
+                'model': 'BiLSTM',
+                'best_fold': int(best_bilstm['fold']),
+                'selection_metric': 'f1_score',
+                'metrics': {
+                    'accuracy': float(best_bilstm['accuracy']),
+                    'precision': float(best_bilstm['precision']),
+                    'recall': float(best_bilstm['recall']),
+                    'f1_score': float(best_bilstm['f1_score']),
+                    'inference_time': float(best_bilstm['avg_inference_time'])
+                }
+            },
+            'LSTM': {
+                'pipeline': 'deep_learning',
+                'model': 'LSTM',
+                'best_fold': int(best_lstm['fold']),
+                'selection_metric': 'f1_score',
+                'metrics': {
+                    'accuracy': float(best_lstm['accuracy']),
+                    'precision': float(best_lstm['precision']),
+                    'recall': float(best_lstm['recall']),
+                    'f1_score': float(best_lstm['f1_score']),
+                    'inference_time': float(best_lstm['avg_inference_time'])
+                }
+            }
+        }
+
         # Persist inference artifacts and evaluation outputs
         training_history_path = os.path.join(output_dir, "lstm_bilstm_training_history.csv")
         save_training_history(training_records, training_history_path)
@@ -832,6 +891,9 @@ def main():
         }
         with open(os.path.join(output_dir, "lstm_bilstm_artifacts_metadata.json"), "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+        with open(os.path.join(output_dir, 'deep_learning_best_fold_summary.json'), 'w', encoding='utf-8') as f:
+            json.dump(best_fold_summary, f, indent=2, ensure_ascii=False)
         
         # Save to pickle
         results_pkl_path = os.path.join(output_dir, 'lstm_bilstm_comparison_results.pkl')
@@ -853,11 +915,33 @@ def main():
         raise
 
 def create_comparison_plots(bilstm_results, lstm_results, bilstm_avg_metrics, lstm_avg_metrics, output_path):
-    """Create comprehensive comparison plots"""
-    plt.figure(figsize=(16, 12))
+    """Create separate professional comparison plots for LSTM vs BiLSTM models."""
+    output_dir = Path(output_path).parent
     
-    # Performance comparison
-    plt.subplot(2, 3, 1)
+    # Combine results for easier handling
+    fold_results_dict = {'BiLSTM': bilstm_results, 'LSTM': lstm_results}
+    avg_metrics_dict = {'BiLSTM': bilstm_avg_metrics, 'LSTM': lstm_avg_metrics}
+    
+    # Export per-fold metrics to CSV
+    export_fold_metrics_csv(fold_results_dict, output_dir, "dl_fold_metrics")
+    
+    # Figure 1: Metrics Panel (2x2)
+    plot_metrics_panel(fold_results_dict, output_dir, "dl_metrics_panel")
+    
+    # Figure 2: Loss Comparison
+    loss_fig = plot_loss_comparison(fold_results_dict, output_dir, "dl_loss_comparison")
+    
+    # Figure 3: Model Comparison (Average Metrics)
+    plot_model_comparison_bar(
+        avg_metrics_dict,
+        metrics=['accuracy', 'precision', 'recall', 'f1_score'],
+        output_path=output_dir,
+        filename_stem="dl_model_comparison",
+        title="DL Model Performance Comparison (LSTM vs BiLSTM)"
+    )
+    
+    # Figure 4: Performance Comparison (Grouped Bar Chart)
+    fig, ax = plt.subplots(figsize=(12, 6))
     metrics = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
     bilstm_values = [bilstm_avg_metrics['accuracy'], bilstm_avg_metrics['precision'], 
                      bilstm_avg_metrics['recall'], bilstm_avg_metrics['f1_score']]
@@ -867,72 +951,118 @@ def create_comparison_plots(bilstm_results, lstm_results, bilstm_avg_metrics, ls
     x = np.arange(len(metrics))
     width = 0.35
     
-    plt.bar(x - width/2, bilstm_values, width, label='BiLSTM', alpha=0.8, color='blue')
-    plt.bar(x + width/2, lstm_values, width, label='LSTM', alpha=0.8, color='orange')
-    plt.xlabel('Metrics')
-    plt.ylabel('Score')
-    plt.title('Model Performance Comparison')
-    plt.xticks(x, metrics)
-    plt.legend()
-    plt.ylim(0, 1)
-    plt.grid(True, alpha=0.3)
-    
-    # Inference time comparison
-    plt.subplot(2, 3, 2)
-    plt.bar(['BiLSTM', 'LSTM'], 
-            [bilstm_avg_metrics['avg_inference_time'], lstm_avg_metrics['avg_inference_time']], 
-            color=['blue', 'orange'], alpha=0.7)
-    plt.ylabel('Inference Time (s)')
-    plt.title('Inference Time Comparison')
-    plt.grid(True, alpha=0.3)
-    
-    # Memory usage comparison
-    plt.subplot(2, 3, 3)
-    plt.bar(['BiLSTM', 'LSTM'], 
-            [bilstm_avg_metrics['avg_gpu_memory'], lstm_avg_metrics['avg_gpu_memory']], 
-            color=['green', 'red'], alpha=0.7)
-    plt.ylabel('GPU Memory Usage (GB)')
-    plt.title('Memory Usage Comparison')
-    plt.grid(True, alpha=0.3)
-    
-    # F1 score across folds
-    plt.subplot(2, 3, 4)
-    folds = range(1, 11)
-    plt.plot(folds, [r['f1_score'] for r in bilstm_results], 'bo-', label='BiLSTM', linewidth=2)
-    plt.plot(folds, [r['f1_score'] for r in lstm_results], 'ro-', label='LSTM', linewidth=2)
-    plt.xlabel('Fold')
-    plt.ylabel('F1 Score')
-    plt.title('F1 Score Across Folds')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Accuracy across folds
-    plt.subplot(2, 3, 5)
-    plt.plot(folds, [r['accuracy'] for r in bilstm_results], 'bo-', label='BiLSTM', linewidth=2)
-    plt.plot(folds, [r['accuracy'] for r in lstm_results], 'ro-', label='LSTM', linewidth=2)
-    plt.xlabel('Fold')
-    plt.ylabel('Accuracy')
-    plt.title('Accuracy Across Folds')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Performance scatter plot
-    plt.subplot(2, 3, 6)
-    plt.scatter([r['avg_inference_time'] for r in bilstm_results],
-                [r['f1_score'] for r in bilstm_results],
-                c='blue', label='BiLSTM', alpha=0.7, s=60)
-    plt.scatter([r['avg_inference_time'] for r in lstm_results],
-                [r['f1_score'] for r in lstm_results],
-                c='orange', label='LSTM', alpha=0.7, s=60)
-    plt.xlabel('Inference Time (s)')
-    plt.ylabel('F1 Score')
-    plt.title('Performance vs Speed Trade-off')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    ax.bar(x - width/2, bilstm_values, width, label='BiLSTM', alpha=0.8, color='#1f77b4', edgecolor='black')
+    ax.bar(x + width/2, lstm_values, width, label='LSTM', alpha=0.8, color='#ff7f0e', edgecolor='black')
+    ax.set_xlabel('Metrics', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Score', fontsize=12, fontweight='bold')
+    ax.set_title('Model Performance Comparison', fontsize=13, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(metrics)
+    ax.legend(fontsize=11)
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, alpha=0.3, axis='y')
     
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
+    plt.savefig(output_dir / 'dl_performance_comparison.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'dl_performance_comparison.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # Figure 5: Inference Time Comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    models = ['BiLSTM', 'LSTM']
+    times = [bilstm_avg_metrics['avg_inference_time'], lstm_avg_metrics['avg_inference_time']]
+    bars = ax.bar(models, times, color=['#1f77b4', '#ff7f0e'], alpha=0.8, edgecolor='black')
+    ax.set_ylabel('Inference Time (seconds)', fontsize=12, fontweight='bold')
+    ax.set_title('Inference Time Comparison', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    for bar, time_val in zip(bars, times):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.0005,
+               f'{time_val:.4f}s', ha='center', va='bottom', fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'dl_inference_time.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'dl_inference_time.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # Figure 6: Memory Usage Comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    memory = [bilstm_avg_metrics['avg_gpu_memory'], lstm_avg_metrics['avg_gpu_memory']]
+    bars = ax.bar(models, memory, color=['#2ca02c', '#d62728'], alpha=0.8, edgecolor='black')
+    ax.set_ylabel('GPU Memory Usage (GB)', fontsize=12, fontweight='bold')
+    ax.set_title('Memory Usage Comparison', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    for bar, mem_val in zip(bars, memory):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+               f'{mem_val:.3f}GB', ha='center', va='bottom', fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'dl_memory_usage.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'dl_memory_usage.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # Figure 7: F1 Score Across Folds
+    fig, ax = plt.subplots(figsize=(12, 6))
+    folds = range(1, 11)
+    ax.plot(folds, [r['f1_score'] for r in bilstm_results], 'o-', label='BiLSTM', linewidth=2.5, markersize=8, color='#1f77b4')
+    ax.plot(folds, [r['f1_score'] for r in lstm_results], 'o-', label='LSTM', linewidth=2.5, markersize=8, color='#ff7f0e')
+    ax.set_xlabel('Fold Number', fontsize=12, fontweight='bold')
+    ax.set_ylabel('F1 Score', fontsize=12, fontweight='bold')
+    ax.set_title('F1 Score Trends Across CV Folds', fontsize=13, fontweight='bold')
+    ax.set_xticks(folds)
+    ax.legend(fontsize=11)
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'dl_f1_trends.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'dl_f1_trends.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # Figure 8: Accuracy Across Folds
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(folds, [r['accuracy'] for r in bilstm_results], 'o-', label='BiLSTM', linewidth=2.5, markersize=8, color='#1f77b4')
+    ax.plot(folds, [r['accuracy'] for r in lstm_results], 'o-', label='LSTM', linewidth=2.5, markersize=8, color='#ff7f0e')
+    ax.set_xlabel('Fold Number', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
+    ax.set_title('Accuracy Trends Across CV Folds', fontsize=13, fontweight='bold')
+    ax.set_xticks(folds)
+    ax.legend(fontsize=11)
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'dl_accuracy_trends.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'dl_accuracy_trends.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # Figure 9: Performance vs Speed Trade-off
+    fig, ax = plt.subplots(figsize=(10, 7))
+    ax.scatter([r['avg_inference_time'] for r in bilstm_results],
+               [r['f1_score'] for r in bilstm_results],
+               c='#1f77b4', label='BiLSTM', alpha=0.7, s=150, edgecolors='black', linewidth=2)
+    ax.scatter([r['avg_inference_time'] for r in lstm_results],
+               [r['f1_score'] for r in lstm_results],
+               c='#ff7f0e', label='LSTM', alpha=0.7, s=150, edgecolors='black', linewidth=2)
+    
+    # Add annotations for average points
+    ax.axvline(x=bilstm_avg_metrics['avg_inference_time'], color='#1f77b4', linestyle='--', alpha=0.5, linewidth=2)
+    ax.axvline(x=lstm_avg_metrics['avg_inference_time'], color='#ff7f0e', linestyle='--', alpha=0.5, linewidth=2)
+    
+    ax.set_xlabel('Inference Time (seconds)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('F1 Score', fontsize=12, fontweight='bold')
+    ax.set_title('Performance vs Speed Trade-off', fontsize=13, fontweight='bold')
+    ax.legend(fontsize=11, loc='best')
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'dl_performance_speed_tradeoff.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'dl_performance_speed_tradeoff.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    log_to_report("Separate comparison figures created successfully in " + str(output_dir))
 
 def generate_markdown_report(results_summary, output_path):
     """Generate comprehensive markdown report"""

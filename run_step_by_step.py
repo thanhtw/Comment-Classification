@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-STEP_ORDER = ["machine-learning", "deep-learning", "transformer"]
+STEP_ORDER = ["machine-learning", "deep-learning", "transformer", "llm-groq", "cross-comparison"]
 SECTION_WIDTH = 80
 
 
@@ -37,6 +37,14 @@ def _build_steps(project_root: Path) -> dict[str, PipelineStep]:
             name="Transformer",
             script_path=project_root / "src" / "models" / "transformer_pipeline.py",
         ),
+        "llm-groq": PipelineStep(
+            name="LLM Groq Inference",
+            script_path=project_root / "src" / "models" / "llm_groq_inference.py",
+        ),
+        "cross-comparison": PipelineStep(
+            name="Cross-Pipeline Best-Fold Comparison",
+            script_path=project_root / "src" / "models" / "cross_pipeline_best_fold_report.py",
+        ),
     }
 
 
@@ -63,7 +71,7 @@ def run_step(name: str, script_path: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run project pipelines step by step: Machine Learning -> Deep Learning -> Transformer"
+        description="Run project pipelines step by step and generate unified best-fold comparison report"
     )
     parser.add_argument(
         "--continue-on-error",
@@ -73,7 +81,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         nargs="+",
-        choices=["machine-learning", "deep-learning", "transformer"],
+        choices=["machine-learning", "deep-learning", "transformer", "llm-groq", "cross-comparison"],
         help="Run only selected pipeline step(s).",
     )
     args = parser.parse_args()

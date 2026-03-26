@@ -1,10 +1,48 @@
-import pandas as pd
-import numpy as np
-import time
-import random
+"""Machine learning pipeline for binary text classification using classical models.
+
+This module implements:
+- 10-fold stratified cross-validation with SMOTE balancing
+- Three classifiers: SVM, Naive Bayes, Random Forest
+- Class weight balancing and performance metrics
+- Best-fold selection and comprehensive reporting
+- Optional Groq LLM inference on test set
+"""
+
+import json
+import logging
+import os
+import sys
+from collections import Counter
+from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+import importlib
+import jieba
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pickle
+import random
 import seaborn as sns
-import psutil
+import time
+import warnings
+from imblearn.over_sampling import SMOTE
+
+# Import professional figure utilities
+from src.utils.figure_utils import (
+    export_fold_metrics_csv,
+    plot_fold_metrics_comparison,
+    plot_metrics_panel,
+    plot_model_comparison_bar,
+    setup_professional_style,
+    save_figure_multi_format
+)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
 from sklearn.naive_bayes import MultinomialNB
@@ -637,7 +675,7 @@ def load_and_clean_data(path):
 
 def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, class_distribution, output_path):
     """
-    Create comprehensive visualizations including class balance information.
+    Create separate professional visualizations for comprehensive model analysis.
     
     Args:
         fold_results_dict: Dictionary of fold results for each model
@@ -647,25 +685,33 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
     # Set style for publication-quality plots
     set_publication_style()
     
-    # Create a large figure with multiple subplots
-    fig = plt.figure(figsize=(20, 16))
+    output_dir = Path(output_path).parent
+    models = list(avg_metrics_dict.keys())
     
-    # 1. Class Distribution Visualization
-    ax0 = plt.subplot(3, 4, 1)
+    # 1. Class Distribution Visualization (Pie Chart)
+    fig, ax = plt.subplots(figsize=(8, 6))
     labels = [
         f"Label 0 ({LABEL_DISPLAY_NAMES[LABEL_NO_MEANINGFUL]})",
         f"Label 1 ({LABEL_DISPLAY_NAMES[LABEL_MEANINGFUL]})",
     ]
     counts = [class_distribution['negative_count'], class_distribution['positive_count']]
-    colors = ['lightcoral', 'lightblue']
+    colors = ['#e74c3c', '#3498db']
     
-    wedges, texts, autotexts = ax0.pie(counts, labels=labels, autopct='%1.1f%%', 
+    wedges, texts, autotexts = ax.pie(counts, labels=labels, autopct='%1.1f%%', 
                                        colors=colors, startangle=90)
-    ax0.set_title(f'Class Distribution\n(Imbalance Ratio: {class_distribution["imbalance_ratio"]:.2f}:1)')
+    ax.set_title(f'Class Distribution\n(Imbalance Ratio: {class_distribution["imbalance_ratio"]:.2f}:1)',
+                fontsize=13, fontweight='bold')
+    for autotext in autotexts:
+        autotext.set_color('white')
+        autotext.set_fontweight('bold')
     
-    # 2. Model Performance Comparison (Bar Chart)
-    ax1 = plt.subplot(3, 4, 2)
-    models = list(avg_metrics_dict.keys())
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_class_distribution.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_class_distribution.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # 2. Model Performance Comparison (Grouped Bar Chart)
+    fig, ax = plt.subplots(figsize=(12, 6))
     metrics = ['accuracy', 'precision', 'recall', 'f1_score', 'roc_auc']
     
     x = np.arange(len(models))
@@ -673,18 +719,24 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
     
     for i, metric in enumerate(metrics):
         values = [avg_metrics_dict[model][metric] for model in models]
-        ax1.bar(x + i * width, values, width, label=metric.replace('_', ' ').title())
+        ax.bar(x + i * width, values, width, label=metric.replace('_', ' ').title())
     
-    ax1.set_xlabel('Models')
-    ax1.set_ylabel('Score')
-    ax1.set_title('Model Performance Comparison\n(Class Weight Balanced)')
-    ax1.set_xticks(x + width * 2)
-    ax1.set_xticklabels(models)
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
+    ax.set_xlabel('Models', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Score', fontsize=12, fontweight='bold')
+    ax.set_title('Model Performance Comparison (Class Weight Balanced)', fontsize=13, fontweight='bold')
+    ax.set_xticks(x + width * 2)
+    ax.set_xticklabels(models)
+    ax.legend(loc='lower right')
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_model_performance_comparison.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_model_performance_comparison.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
     
     # 3. F1-Score Distribution Across Folds (Box Plot)
-    ax2 = plt.subplot(3, 4, 3)
+    fig, ax = plt.subplots(figsize=(10, 6))
     f1_data = []
     model_labels = []
     
@@ -693,93 +745,127 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
         f1_data.append(f1_scores)
         model_labels.append(model)
     
-    box_plot = ax2.boxplot(f1_data, labels=model_labels, patch_artist=True)
-    colors = ['lightblue', 'lightgreen', 'lightcoral']
+    box_plot = ax.boxplot(f1_data, labels=model_labels, patch_artist=True)
+    colors = ['#3498db', '#2ecc71', '#e74c3c']
     for patch, color in zip(box_plot['boxes'], colors):
         patch.set_facecolor(color)
+        patch.set_alpha(0.7)
     
-    ax2.set_ylabel('F1-Score')
-    ax2.set_title('F1-Score Distribution\n(Balanced Training)')
-    ax2.grid(True, alpha=0.3)
+    ax.set_ylabel('F1-Score', fontsize=12, fontweight='bold')
+    ax.set_title('F1-Score Distribution Across CV Folds (Balanced Training)', fontsize=13, fontweight='bold')
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_f1_score_distribution.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_f1_score_distribution.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
     
     # 4. Inference Time Comparison (Bar Chart)
-    ax3 = plt.subplot(3, 4, 4)
+    fig, ax = plt.subplots(figsize=(10, 6))
     inference_times = [avg_metrics_dict[model]['inference_time'] for model in models]
-    bars = ax3.bar(models, inference_times, color=['skyblue', 'lightgreen', 'salmon'])
-    ax3.set_ylabel('Inference Time (seconds)')
-    ax3.set_title('Model Inference Time Comparison')
-    ax3.grid(True, alpha=0.3)
+    bars = ax.bar(models, inference_times, color=['#3498db', '#2ecc71', '#e74c3c'], alpha=0.8, edgecolor='black')
+    ax.set_ylabel('Inference Time (seconds)', fontsize=12, fontweight='bold')
+    ax.set_title('Model Inference Time Comparison', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
     
     # Add value labels on bars
     for bar, time_val in zip(bars, inference_times):
-        ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
-                f'{time_val:.4f}s', ha='center', va='bottom')
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.0005,
+                f'{time_val:.4f}s', ha='center', va='bottom', fontweight='bold')
     
-    # Continue with remaining subplots...
-    # [Rest of the visualization code remains the same but with updated titles mentioning "Balanced"]
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_inference_time.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_inference_time.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
     
-    # 5. Samples Per Second (Throughput)
-    ax4 = plt.subplot(3, 4, 5)
+    # 5. Throughput Comparison (Bar Chart)
+    fig, ax = plt.subplots(figsize=(10, 6))
     throughput = [avg_metrics_dict[model]['samples_per_second'] for model in models]
-    bars = ax4.bar(models, throughput, color=['gold', 'lightcyan', 'plum'])
-    ax4.set_ylabel('Samples Per Second')
-    ax4.set_title('Model Throughput Comparison')
-    ax4.grid(True, alpha=0.3)
+    bars = ax.bar(models, throughput, color=['#9b59b6', '#f39c12', '#1abc9c'], alpha=0.8, edgecolor='black')
+    ax.set_ylabel('Samples Per Second', fontsize=12, fontweight='bold')
+    ax.set_title('Model Throughput Comparison', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
     
     for bar, throughput_val in zip(bars, throughput):
-        ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 100,
-                f'{throughput_val:.0f}', ha='center', va='bottom')
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
+                f'{throughput_val:.0f}', ha='center', va='bottom', fontweight='bold')
     
-    # 6. Performance vs Inference Time Scatter Plot
-    ax5 = plt.subplot(3, 4, 6)
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_throughput.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_throughput.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
+    
+    # 6. Performance vs Speed Trade-off (Scatter Plot)
+    fig, ax = plt.subplots(figsize=(10, 7))
+    colors_scatter = ['#3498db', '#2ecc71', '#e74c3c']
+    
     for i, model in enumerate(models):
         f1 = avg_metrics_dict[model]['f1_score']
         time_val = avg_metrics_dict[model]['inference_time']
-        ax5.scatter(time_val, f1, s=200, label=model, alpha=0.7)
-        ax5.annotate(model, (time_val, f1), xytext=(5, 5), 
-                    textcoords='offset points', fontsize=10)
+        ax.scatter(time_val, f1, s=300, label=model, alpha=0.7, color=colors_scatter[i], edgecolors='black', linewidth=2)
+        ax.annotate(model, (time_val, f1), xytext=(5, 5), 
+                    textcoords='offset points', fontsize=11, fontweight='bold')
     
-    ax5.set_xlabel('Inference Time (seconds)')
-    ax5.set_ylabel('F1-Score')
-    ax5.set_title('Performance vs Speed Trade-off\n(Balanced Models)')
-    ax5.grid(True, alpha=0.3)
-    ax5.legend()
+    ax.set_xlabel('Inference Time (seconds)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('F1-Score', fontsize=12, fontweight='bold')
+    ax.set_title('Performance vs Speed Trade-off (Balanced Models)', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=11)
+    ax.set_ylim([0, 1.05])
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_performance_speed_tradeoff.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_performance_speed_tradeoff.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
     
     # 7. Accuracy Trends Across Folds (Line Plot)
-    ax6 = plt.subplot(3, 4, 7)
+    fig, ax = plt.subplots(figsize=(12, 6))
     folds = range(1, len(fold_results_dict[models[0]]) + 1)
+    colors_line = ['#3498db', '#2ecc71', '#e74c3c']
     
-    for model in models:
+    for i, model in enumerate(models):
         accuracies = [fold['accuracy'] for fold in fold_results_dict[model]]
-        ax6.plot(folds, accuracies, marker='o', label=model, linewidth=2)
+        ax.plot(folds, accuracies, marker='o', label=model, linewidth=2.5, markersize=8, color=colors_line[i])
     
-    ax6.set_xlabel('Fold Number')
-    ax6.set_ylabel('Accuracy')
-    ax6.set_title('Accuracy Trends Across CV Folds')
-    ax6.legend()
-    ax6.grid(True, alpha=0.3)
+    ax.set_xlabel('Fold Number', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Accuracy', fontsize=12, fontweight='bold')
+    ax.set_title('Accuracy Trends Across CV Folds', fontsize=13, fontweight='bold')
+    ax.legend(loc='best', fontsize=11)
+    ax.set_ylim([0, 1.05])
+    ax.set_xticks(folds)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'ml_accuracy_trends.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_accuracy_trends.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
     
     # 8. Precision vs Recall Scatter Plot
-    ax7 = plt.subplot(3, 4, 8)
-    for model in models:
+    fig, ax = plt.subplots(figsize=(10, 7))
+    colors_pq = ['#3498db', '#2ecc71', '#e74c3c']
+    
+    for i, model in enumerate(models):
         precision = avg_metrics_dict[model]['precision']
         recall = avg_metrics_dict[model]['recall']
-        ax7.scatter(recall, precision, s=200, label=model, alpha=0.7)
-        ax7.annotate(model, (recall, precision), xytext=(5, 5), 
-                    textcoords='offset points', fontsize=10)
+        ax.scatter(recall, precision, s=300, label=model, alpha=0.7, color=colors_pq[i], edgecolors='black', linewidth=2)
+        ax.annotate(model, (recall, precision), xytext=(5, 5), 
+                    textcoords='offset points', fontsize=11, fontweight='bold')
     
-    ax7.set_xlabel('Recall')
-    ax7.set_ylabel('Precision')
-    ax7.set_title('Precision vs Recall\n(Balanced Training)')
-    ax7.grid(True, alpha=0.3)
-    ax7.legend()
+    ax.set_xlabel('Recall', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Precision', fontsize=12, fontweight='bold')
+    ax.set_title('Precision vs Recall Comparison (Balanced Training)', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=11)
+    ax.set_xlim([0, 1.05])
+    ax.set_ylim([0, 1.05])
     
-    # Continue with remaining visualization code...
     plt.tight_layout()
-    plt.savefig(output_path, dpi=600, bbox_inches='tight')
-    plt.close()
+    plt.savefig(output_dir / 'ml_precision_recall.png', dpi=600, bbox_inches='tight')
+    plt.savefig(output_dir / 'ml_precision_recall.pdf', dpi=600, bbox_inches='tight')
+    plt.close(fig)
     
-    logger.info(f"Comprehensive visualizations created and saved to {output_path}")
+    logger.info(f"Separate comprehensive visualizations created in {output_dir}")
 
 
 def apply_smote_resampling(X_train, y_train, random_state=42):
@@ -936,6 +1022,7 @@ def run_comprehensive_experiment():
         
         # Store results
         for model_name in fold_metrics:
+            fold_metrics[model_name]['fold'] = fold + 1
             fold_metrics[model_name]['train_log_loss'] = train_fold_metrics[model_name]['log_loss']
             fold_metrics[model_name]['val_log_loss'] = fold_metrics[model_name]['log_loss']
             all_fold_results[model_name].append(fold_metrics[model_name])
@@ -1022,6 +1109,26 @@ def run_comprehensive_experiment():
         best_score = avg_metrics[best_model][metric]
         best_models[metric] = (best_model, best_score)
         print(f"Best {metric.replace('_', ' ').title()}: {best_model} ({best_score:.4f})")
+
+    # Select best fold per model based on validation F1 score.
+    best_fold_summary = {}
+    for model_name, fold_rows in all_fold_results.items():
+        best_row = max(fold_rows, key=lambda r: r['f1_score'])
+        best_fold_summary[model_name] = {
+            'pipeline': 'machine_learning',
+            'model': model_name,
+            'best_fold': int(best_row.get('fold', 1)),
+            'selection_metric': 'f1_score',
+            'smote_applied_in_training_fold': True,
+            'metrics': {
+                'accuracy': float(best_row['accuracy']),
+                'precision': float(best_row['precision']),
+                'recall': float(best_row['recall']),
+                'f1_score': float(best_row['f1_score']),
+                'roc_auc': float(best_row['roc_auc']),
+                'inference_time': float(best_row['inference_time'])
+            }
+        }
     
     # Speed comparison
     fastest_model = min(avg_metrics.keys(), key=lambda x: avg_metrics[x]['inference_time'])
@@ -1065,22 +1172,7 @@ def run_comprehensive_experiment():
     test_predictions = final_classifier.predict_models(X_test_tfidf)
     test_metrics = final_classifier.compute_metrics(test_labels, test_predictions, len(test_labels))
 
-    # Optional LLM inference stage (Groq): zero-shot and few-shot
-    try:
-        llm_module = importlib.import_module('src.models.llm_groq_inference')
-    except ModuleNotFoundError:
-        llm_module = importlib.import_module('llm_groq_inference')
-
-    llm_runner = llm_module.GroqLLMInferenceRunner(logger=logger)
-    llm_metrics = llm_runner.run(
-        test_texts=test_texts,
-        test_labels=test_labels,
-        train_texts=cv_texts,
-        train_labels=cv_labels,
-        artifacts_dir=artifacts_dir,
-        model_names=['Qwen2.5-7B-Instruct', 'llama-3.1-8b-instant'],
-        max_samples=200
-    )
+    
 
     # Create confusion matrix and train-loss charts for each model
     create_confusion_matrix_plots(test_labels, test_predictions, output_dir=str(result_dirs['figures']))
@@ -1106,8 +1198,16 @@ def run_comprehensive_experiment():
 
     for model_name, fold_frames in all_fold_predictions.items():
         if fold_frames:
-            pd.concat(fold_frames, ignore_index=True).to_csv(
+            combined_cv = pd.concat(fold_frames, ignore_index=True)
+            combined_cv.to_csv(
                 os.path.join(artifacts_dir, f"{model_name.lower()}_cv_predictions.csv"),
+                index=False,
+                encoding='utf-8'
+            )
+
+            best_fold_id = best_fold_summary[model_name]['best_fold']
+            combined_cv[combined_cv['fold'] == best_fold_id].to_csv(
+                os.path.join(artifacts_dir, f"{model_name.lower()}_best_fold_predictions.csv"),
                 index=False,
                 encoding='utf-8'
             )
@@ -1145,12 +1245,16 @@ def run_comprehensive_experiment():
             'model_backend': final_classifier.model_backend
         },
         'cv_avg_metrics': avg_metrics,
-        'heldout_test_metrics': test_metrics,
-        'groq_llm_metrics': llm_metrics,
+        'cv_best_fold_metrics': best_fold_summary,
+        'cv_training_smote': True,
+        'heldout_test_metrics': test_metrics,        
         'saved_model_file': str(result_dirs['models'] / 'best_models_comparison_balanced_all_models.pkl')
     }
     with open(os.path.join(artifacts_dir, 'ml_training_info.json'), 'w', encoding='utf-8') as f:
         json.dump(training_info, f, indent=2, ensure_ascii=False, default=float)
+
+    with open(os.path.join(artifacts_dir, 'ml_best_fold_summary.json'), 'w', encoding='utf-8') as f:
+        json.dump(best_fold_summary, f, indent=2, ensure_ascii=False)
     
     # Generate model comparison report
     generate_model_comparison_report(
@@ -1166,66 +1270,26 @@ def run_comprehensive_experiment():
 
 def create_publication_ready_plots(avg_metrics_dict, fold_results_dict, output_dir='.'):
     """
-    Create clean, publication-ready plots for educational journal with class balancing info.
+    Create professional publication-ready plots using unified figure utilities.
+    Generates: metrics panel, fold-by-fold comparisons, per-fold CSV export.
     """
-    # Set publication style
-    set_publication_style()
-    os.makedirs(output_dir, exist_ok=True)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
     
-    # Figure 1: Performance Metrics Comparison
-    fig1, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
+    # Export per-fold metrics to CSV for reproducibility
+    export_fold_metrics_csv(fold_results_dict, output_path, "ml_fold_metrics")
     
-    models = list(avg_metrics_dict.keys())
+    # Figure 1: 2x2 Panel of Metrics Across Folds
+    plot_metrics_panel(fold_results_dict, output_path, "ml_metrics_panel")
     
-    # Accuracy, Precision, Recall, F1-Score
-    metrics = ['accuracy', 'precision', 'recall', 'f1_score']
-    metric_labels = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
-    
-    for i, (ax, metric, label) in enumerate(zip([ax1, ax2, ax3, ax4], metrics, metric_labels)):
-        values = [avg_metrics_dict[model][metric] for model in models]
-        bars = ax.bar(models, values, color=['#3498db', '#2ecc71', '#e74c3c'])
-        ax.set_ylabel(label)
-        ax.set_title(f'{label} Comparison\n(Class Weight Balanced)')
-        ax.set_ylim(0, 1)
-        ax.grid(True, alpha=0.3)
-        
-        # Add value labels
-        for bar, val in zip(bars, values):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                   f'{val:.4f}', ha='center', va='bottom')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'publication_figure1_performance_metrics_balanced.png'), dpi=600, bbox_inches='tight')
-    plt.close()
-    
-    # Figure 2: Computational Efficiency
-    fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # Inference time
-    inference_times = [avg_metrics_dict[model]['inference_time'] for model in models]
-    bars1 = ax1.bar(models, inference_times, color=['#9b59b6', '#f39c12', '#1abc9c'])
-    ax1.set_ylabel('Inference Time (seconds)')
-    ax1.set_title('Model Inference Time\n(Class Balanced)')
-    ax1.grid(True, alpha=0.3)
-    
-    for bar, time_val in zip(bars1, inference_times):
-        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.0001,
-                f'{time_val:.4f}', ha='center', va='bottom', rotation=90)
-    
-    # Throughput
-    throughput = [avg_metrics_dict[model]['samples_per_second'] for model in models]
-    bars2 = ax2.bar(models, throughput, color=['#34495e', '#e67e22', '#16a085'])
-    ax2.set_ylabel('Samples Per Second')
-    ax2.set_title('Model Throughput\n(Class Balanced)')
-    ax2.grid(True, alpha=0.3)
-    
-    for bar, tp_val in zip(bars2, throughput):
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
-                f'{tp_val:.0f}', ha='center', va='bottom')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'publication_figure2_computational_efficiency_balanced.png'), dpi=600, bbox_inches='tight')
-    plt.close()
+    # Figure 2: Model Performance Comparison (Average Metrics)
+    plot_model_comparison_bar(
+        avg_metrics_dict,
+        metrics=['accuracy', 'precision', 'recall', 'f1_score'],
+        output_path=output_path,
+        filename_stem="ml_model_comparison",
+        title="ML Model Performance Comparison (SMOTE Balanced)"
+    )
 
 def perform_statistical_analysis(fold_results_dict):
     """
@@ -1415,30 +1479,40 @@ For educational journal publication, this comprehensive evaluation demonstrates 
 
 def create_confusion_matrix_plots(y_true, prediction_dict, output_dir='.'):
     """
-    Create confusion matrix plots for final test predictions of each model.
+    Create separate confusion matrix plots for each model on test predictions.
     """
     os.makedirs(output_dir, exist_ok=True)
     
     set_publication_style()
-    # Create confusion matrices
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    
     models = ['SVM', 'Naive_Bayes', 'Random_Forest']
+    model_display_names = {'SVM': 'SVM', 'Naive_Bayes': 'Naive Bayes', 'Random_Forest': 'Random Forest'}
     
-    for i, model in enumerate(models):
+    for model in models:
+        fig, ax = plt.subplots(figsize=(8, 7))
         y_pred = prediction_dict[model]['predictions']
         cm = confusion_matrix(y_true, y_pred)
         
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[i])
-        axes[i].set_title(f'{model} Confusion Matrix\n(Class Balanced)')
-        axes[i].set_xlabel('Predicted')
-        axes[i].set_ylabel('Actual')
-        axes[i].set_xticklabels(['No-meaningful (0)', 'Meaningful (1)'], rotation=30, ha='right')
-        axes[i].set_yticklabels(['No-meaningful (0)', 'Meaningful (1)'], rotation=0)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar=True, 
+                   cbar_kws={'label': 'Count'}, annot_kws={'fontsize': 14, 'fontweight': 'bold'})
+        ax.set_title(f'{model_display_names[model]} - Confusion Matrix (Test Set)', 
+                    fontsize=13, fontweight='bold')
+        ax.set_xlabel('Predicted Label', fontsize=12, fontweight='bold')
+        ax.set_ylabel('True Label', fontsize=12, fontweight='bold')
+        ax.set_xticklabels(['No-Meaningful', 'Meaningful'], rotation=45, ha='right')
+        ax.set_yticklabels(['No-Meaningful', 'Meaningful'], rotation=0)
+        
+        # Add accuracy info
+        accuracy = np.trace(cm) / np.sum(cm)
+        ax.text(0.5, -0.15, f'Accuracy: {accuracy:.4f}', ha='center', va='top',
+               transform=ax.transAxes, fontsize=11, fontweight='bold')
+        
+        plt.tight_layout()
+        filename_base = f'ml_confusion_matrix_{model.lower()}'
+        plt.savefig(os.path.join(output_dir, f'{filename_base}.png'), dpi=600, bbox_inches='tight')
+        plt.savefig(os.path.join(output_dir, f'{filename_base}.pdf'), dpi=600, bbox_inches='tight')
+        plt.close(fig)
     
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'confusion_matrices_balanced.png'), dpi=600, bbox_inches='tight')
-    plt.close()
+    logger.info(f"Separate confusion matrix plots created in {output_dir}")
 
 
 def create_train_loss_plots(fold_results_dict, output_dir='.'):
