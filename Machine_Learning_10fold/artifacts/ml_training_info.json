@@ -1,0 +1,137 @@
+{
+  "experiment": "BinaryTextClassifierComparison",
+  "total_samples": 2348,
+  "cv_training_samples": 1878,
+  "heldout_test_samples": 470,
+  "class_distribution_total": {
+    "total_samples": 2348,
+    "positive_count": 1756.0,
+    "negative_count": 592.0,
+    "positive_ratio": 74.78705281090289,
+    "negative_ratio": 25.2129471890971,
+    "imbalance_ratio": 2.9662162162162162
+  },
+  "class_distribution_train": {
+    "total_samples": 1878,
+    "positive_count": 1405.0,
+    "negative_count": 473.0,
+    "positive_ratio": 74.8136315228967,
+    "negative_ratio": 25.1863684771033,
+    "imbalance_ratio": 2.970401691331924
+  },
+  "class_distribution_test": {
+    "total_samples": 470,
+    "positive_count": 351.0,
+    "negative_count": 119.0,
+    "positive_ratio": 74.68085106382979,
+    "negative_ratio": 25.319148936170212,
+    "imbalance_ratio": 2.9495798319327733
+  },
+  "smote_training_distribution": {
+    "before": {
+      "class_0": 473,
+      "class_1": 1405
+    },
+    "after": {
+      "class_0": 1405,
+      "class_1": 1405
+    }
+  },
+  "class_weights": null,
+  "vectorizer_settings": {
+    "max_features": 5000,
+    "ngram_range": [
+      1,
+      2
+    ],
+    "min_df": 2,
+    "max_df": 0.95
+  },
+  "cv_avg_metrics": {
+    "SVM": {
+      "accuracy": 0.9217459324155193,
+      "precision": 0.9409328981581166,
+      "recall": 0.9558611955420465,
+      "f1_score": 0.9480703296860071,
+      "roc_auc": 0.9346096562493263,
+      "inference_time": 0.551697779999996,
+      "inference_time_per_sample": 0.0029379682128228258,
+      "samples_per_second": 341.5923869280801,
+      "train_log_loss": 0.07440498647329988,
+      "val_log_loss": 0.26308091973301223,
+      "std_accuracy": 0.02082339102570048,
+      "std_f1": 0.013960577634094945,
+      "std_train_log_loss": 0.002699896645084092,
+      "std_val_log_loss": 0.07758494669249592
+    },
+    "Naive_Bayes": {
+      "accuracy": 0.8956422801228807,
+      "precision": 0.9584507545593064,
+      "recall": 0.8995744680851064,
+      "f1_score": 0.9277662701263137,
+      "roc_auc": 0.9291782703065383,
+      "inference_time": 0.00044225999999802923,
+      "inference_time_per_sample": 2.354946239607184e-06,
+      "samples_per_second": 426723.47080250166,
+      "train_log_loss": 0.3237986386462145,
+      "val_log_loss": 0.3348822171644865,
+      "std_accuracy": 0.027938678367009917,
+      "std_f1": 0.020614903553097006,
+      "std_train_log_loss": 0.0068115643016216035,
+      "std_val_log_loss": 0.029683054792531492
+    },
+    "Random_Forest": {
+      "accuracy": 0.8902975310046649,
+      "precision": 0.9665233364580563,
+      "recall": 0.8846555217831813,
+      "f1_score": 0.923409552882107,
+      "roc_auc": 0.9574959513570027,
+      "inference_time": 0.06816081999999782,
+      "inference_time_per_sample": 0.0003629609267265784,
+      "samples_per_second": 2775.7307757530507,
+      "train_log_loss": 0.07594705662274112,
+      "val_log_loss": 0.37296180686256253,
+      "std_accuracy": 0.01660662228545727,
+      "std_f1": 0.011805565074522807,
+      "std_train_log_loss": 0.0023499405992010833,
+      "std_val_log_loss": 0.12238162928684562
+    }
+  },
+  "heldout_test_metrics": {
+    "SVM": {
+      "accuracy": 0.9212765957446809,
+      "precision": 0.9361111111111111,
+      "recall": 0.9601139601139601,
+      "f1_score": 0.9479606188466948,
+      "roc_auc": 0.9185759773995068,
+      "log_loss": 0.2594222831948043,
+      "inference_time": 1.8360291999999845,
+      "inference_time_per_sample": 0.0039064451063829456,
+      "samples_per_second": 255.98721414670527
+    },
+    "Naive_Bayes": {
+      "accuracy": 0.8978723404255319,
+      "precision": 0.9522388059701492,
+      "recall": 0.9088319088319088,
+      "f1_score": 0.9300291545189504,
+      "roc_auc": 0.9340180516651105,
+      "log_loss": 0.3125348648964099,
+      "inference_time": 0.0005176999999889631,
+      "inference_time_per_sample": 1.101489361678645e-06,
+      "samples_per_second": 907861.6959822677
+    },
+    "Random_Forest": {
+      "accuracy": 0.8978723404255319,
+      "precision": 0.954954954954955,
+      "recall": 0.905982905982906,
+      "f1_score": 0.9298245614035088,
+      "roc_auc": 0.9481912423088894,
+      "log_loss": 0.4123572699153956,
+      "inference_time": 0.07145539999999073,
+      "inference_time_per_sample": 0.0001520327659574271,
+      "samples_per_second": 6577.529479928193
+    }
+  },
+  "groq_llm_metrics": null,
+  "saved_model_file": "./best_models_comparison_balanced_all_models.pkl"
+}

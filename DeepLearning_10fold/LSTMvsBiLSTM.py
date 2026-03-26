@@ -18,6 +18,8 @@ import re
 import logging
 from datetime import datetime
 import os
+import json
+from sklearn.model_selection import train_test_split
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,6 +48,53 @@ def log_to_report(message, level="INFO"):
         logger.warning(message)
     elif level == "ERROR":
         logger.error(message)
+
+
+def ensure_output_dir(output_dir="./artifacts"):
+    """Ensure the output directory exists for persisted artifacts."""
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
+def save_training_history(training_records, output_path):
+    """Save epoch-level training/validation loss records."""
+    history_df = pd.DataFrame(training_records)
+    history_df.to_csv(output_path, index=False, encoding="utf-8")
+    log_to_report(f"Training history saved to: {output_path}")
+
+
+def save_test_predictions(test_labels, bilstm_probs, lstm_probs, output_path):
+    """Persist test ground truth and model predictions for future comparison."""
+    predictions_df = pd.DataFrame({
+        "sample_index": np.arange(len(test_labels)),
+        "true_label": test_labels.astype(int),
+        "bilstm_pred_prob": bilstm_probs,
+        "bilstm_pred_label": (bilstm_probs > 0.5).astype(int),
+        "lstm_pred_prob": lstm_probs,
+        "lstm_pred_label": (lstm_probs > 0.5).astype(int)
+    })
+    predictions_df.to_csv(output_path, index=False, encoding="utf-8")
+    log_to_report(f"Test predictions saved to: {output_path}")
+
+
+def run_inference(model, data_loader, device):
+    """Run inference and return probabilities plus average attention weight."""
+    model.eval()
+    probs = []
+    attention_weights = []
+    start_time = time.perf_counter()
+
+    with torch.no_grad():
+        for batch_x, _ in data_loader:
+            batch_x = batch_x.to(device)
+            outputs, attention_weight = model(batch_x, return_attention=True)
+            predictions = torch.sigmoid(outputs).cpu().numpy().flatten()
+            probs.extend(predictions)
+            attention_weights.append(attention_weight)
+
+    inference_time = time.perf_counter() - start_time
+    avg_attention = np.mean(attention_weights) if attention_weights else 0
+    return np.array(probs), inference_time, avg_attention
 
 # 1. Data loading and cleaning
 def load_and_clean_data(path):
@@ -296,7 +345,7 @@ def train_model(model, train_loader, val_loader, model_name, fold, num_epochs=10
     if class_weight_ratio is not None:
         pos_weight = torch.FloatTensor([class_weight_ratio]).to(device)
         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        log_to_report(f"Using weighted loss with pos_weight: {class_weight_ratio:.3f}")
+        log_to_report(f"Using weighted loss with pos_weight: {class_weight_ratio:.4f}")
     else:
         criterion = nn.BCEWithLogitsLoss()
         log_to_report("Using standard BCE loss")
@@ -388,6 +437,8 @@ def analyze_data_distribution(labels, title="Data Distribution"):
 # Main execution
 def main():
     try:
+        output_dir = ensure_output_dir("./artifacts")
+
         # Load data
         log_to_report("=== LSTM vs BiLSTM Comparison Experiment ===")
         data = load_and_clean_data('../data/two-label-data.csv')
@@ -406,14 +457,26 @@ def main():
         vocab = build_vocab(data['processed_text'].tolist())
         embeddings = load_glove_embeddings(vocab, embedding_dim=100)
         sequences = texts_to_sequences(data['processed_text'].tolist(), vocab, max_len=200)
+
+        # Create held-out test split for future model comparison
+        train_sequences_all, test_sequences, train_labels_all, test_labels = train_test_split(
+            sequences,
+            labels,
+            test_size=0.2,
+            random_state=42,
+            stratify=labels,
+            shuffle=True
+        )
+        train_dist = analyze_data_distribution(train_labels_all, "Training Split Distribution")
+        test_dist = analyze_data_distribution(test_labels, "Held-out Test Split Distribution")
         
         # Compute class weights for imbalanced data
         try:
-            class_weights = compute_class_weight('balanced', classes=np.unique(labels), y=labels)
+            class_weights = compute_class_weight('balanced', classes=np.unique(train_labels_all), y=train_labels_all)
             class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
             class_weight_ratio = class_weights[1] / class_weights[0]  # positive/negative
             log_to_report(f"Computed class weights: {class_weight_dict}")
-            log_to_report(f"Class weight ratio (pos/neg): {class_weight_ratio:.3f}")
+            log_to_report(f"Class weight ratio (pos/neg): {class_weight_ratio:.4f}")
         except Exception as e:
             log_to_report(f"Error computing class weights: {e}", "WARNING")
             class_weight_ratio = 1.0
@@ -422,10 +485,11 @@ def main():
         kf = KFold(n_splits=10, shuffle=True, random_state=42)
         bilstm_results = []
         lstm_results = []
+        training_records = []
         
         log_to_report("Starting 10-fold cross-validation...")
         
-        for fold, (train_idx, val_idx) in enumerate(kf.split(sequences)):
+        for fold, (train_idx, val_idx) in enumerate(kf.split(train_sequences_all)):
             log_to_report(f"\n{'='*50}")
             log_to_report(f"FOLD {fold+1}/10")
             log_to_report(f"{'='*50}")
@@ -435,10 +499,10 @@ def main():
                 torch.cuda.reset_peak_memory_stats()
             
             # Split data
-            train_sequences = sequences[train_idx]
-            train_labels = labels[train_idx]
-            val_sequences = sequences[val_idx]
-            val_labels = labels[val_idx]
+            train_sequences = train_sequences_all[train_idx]
+            train_labels = train_labels_all[train_idx]
+            val_sequences = train_sequences_all[val_idx]
+            val_labels = train_labels_all[val_idx]
             
             # Analyze fold distribution
             fold_train_dist = analyze_data_distribution(train_labels, f"Fold {fold+1} Training Data")
@@ -464,28 +528,25 @@ def main():
                 bilstm_model, train_loader, val_loader, "BiLSTM", fold+1, 
                 num_epochs=10, lr=0.001, class_weight_ratio=class_weight_ratio
             )
+
+            for epoch, (tr_loss, va_loss) in enumerate(zip(bilstm_train_losses, bilstm_val_losses), start=1):
+                training_records.append({
+                    "model": "BiLSTM",
+                    "fold": fold + 1,
+                    "epoch": epoch,
+                    "train_loss": tr_loss,
+                    "val_loss": va_loss
+                })
             
             # Evaluate BiLSTM
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            bilstm_model.eval()
-            bilstm_predictions = []
-            bilstm_attention_weights = []
-            start_time = time.perf_counter()
-            
-            with torch.no_grad():
-                for batch_x, _ in val_loader:
-                    batch_x = batch_x.to(device)
-                    outputs, attention_weight = bilstm_model(batch_x, return_attention=True)
-                    predictions = torch.sigmoid(outputs).cpu().numpy().flatten()
-                    bilstm_predictions.extend(predictions)
-                    bilstm_attention_weights.append(attention_weight)
-            
-            bilstm_inference_time = time.perf_counter() - start_time
+            bilstm_predictions, bilstm_inference_time, bilstm_avg_attention = run_inference(
+                bilstm_model, val_loader, device
+            )
             bilstm_gpu_mem = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0
-            bilstm_avg_attention = np.mean(bilstm_attention_weights) if bilstm_attention_weights else 0
             
             bilstm_eval_results = compute_metrics(
-                val_labels, np.array(bilstm_predictions),
+                val_labels, bilstm_predictions,
                 bilstm_inference_time, len(val_labels), 
                 bilstm_gpu_mem, bilstm_avg_attention
             )
@@ -494,10 +555,10 @@ def main():
             bilstm_results.append(bilstm_eval_results)
             
             log_to_report(f"BiLSTM Fold {fold+1} Results: "
-                         f"F1: {bilstm_eval_results['f1_score']:.3f}, "
-                         f"Accuracy: {bilstm_eval_results['accuracy']:.3f}, "
-                         f"Precision: {bilstm_eval_results['precision']:.3f}, "
-                         f"Recall: {bilstm_eval_results['recall']:.3f}")
+                         f"F1: {bilstm_eval_results['f1_score']:.4f}, "
+                         f"Accuracy: {bilstm_eval_results['accuracy']:.4f}, "
+                         f"Precision: {bilstm_eval_results['precision']:.4f}, "
+                         f"Recall: {bilstm_eval_results['recall']:.4f}")
             
             # Train LSTM model
             log_to_report("Training LSTM model...")
@@ -513,27 +574,24 @@ def main():
                 lstm_model, train_loader, val_loader, "LSTM", fold+1,
                 num_epochs=10, lr=0.001, class_weight_ratio=class_weight_ratio
             )
+
+            for epoch, (tr_loss, va_loss) in enumerate(zip(lstm_train_losses, lstm_val_losses), start=1):
+                training_records.append({
+                    "model": "LSTM",
+                    "fold": fold + 1,
+                    "epoch": epoch,
+                    "train_loss": tr_loss,
+                    "val_loss": va_loss
+                })
             
             # Evaluate LSTM
-            lstm_model.eval()
-            lstm_predictions = []
-            lstm_attention_weights = []
-            start_time = time.perf_counter()
-            
-            with torch.no_grad():
-                for batch_x, _ in val_loader:
-                    batch_x = batch_x.to(device)
-                    outputs, attention_weight = lstm_model(batch_x, return_attention=True)
-                    predictions = torch.sigmoid(outputs).cpu().numpy().flatten()
-                    lstm_predictions.extend(predictions)
-                    lstm_attention_weights.append(attention_weight)
-            
-            lstm_inference_time = time.perf_counter() - start_time
+            lstm_predictions, lstm_inference_time, lstm_avg_attention = run_inference(
+                lstm_model, val_loader, device
+            )
             lstm_gpu_mem = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0
-            lstm_avg_attention = np.mean(lstm_attention_weights) if lstm_attention_weights else 0
             
             lstm_eval_results = compute_metrics(
-                val_labels, np.array(lstm_predictions),
+                val_labels, lstm_predictions,
                 lstm_inference_time, len(val_labels), 
                 lstm_gpu_mem, lstm_avg_attention
             )
@@ -542,15 +600,95 @@ def main():
             lstm_results.append(lstm_eval_results)
             
             log_to_report(f"LSTM Fold {fold+1} Results: "
-                         f"F1: {lstm_eval_results['f1_score']:.3f}, "
-                         f"Accuracy: {lstm_eval_results['accuracy']:.3f}, "
-                         f"Precision: {lstm_eval_results['precision']:.3f}, "
-                         f"Recall: {lstm_eval_results['recall']:.3f}")
+                         f"F1: {lstm_eval_results['f1_score']:.4f}, "
+                         f"Accuracy: {lstm_eval_results['accuracy']:.4f}, "
+                         f"Precision: {lstm_eval_results['precision']:.4f}, "
+                         f"Recall: {lstm_eval_results['recall']:.4f}")
             
             # Clean up models
             del bilstm_model, lstm_model
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
+        # Train final models on the full training split and evaluate on held-out test set
+        log_to_report("Training final models on full training split for inference artifacts...")
+        full_train_dataset = TextDataset(train_sequences_all, train_labels_all)
+        test_dataset = TextDataset(test_sequences, test_labels)
+        full_train_loader = DataLoader(full_train_dataset, batch_size=32, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
+        final_bilstm_model = BiLSTMClassifier(
+            vocab_size=len(vocab), embedding_dim=100, hidden_dim=128, embeddings=embeddings, dropout=0.3
+        )
+        final_lstm_model = LSTMClassifier(
+            vocab_size=len(vocab), embedding_dim=100, hidden_dim=128, embeddings=embeddings, dropout=0.3
+        )
+
+        final_bilstm_train_losses, final_bilstm_val_losses, _ = train_model(
+            final_bilstm_model,
+            full_train_loader,
+            test_loader,
+            "BiLSTM_Final",
+            fold=0,
+            num_epochs=10,
+            lr=0.001,
+            class_weight_ratio=class_weight_ratio
+        )
+        final_lstm_train_losses, final_lstm_val_losses, _ = train_model(
+            final_lstm_model,
+            full_train_loader,
+            test_loader,
+            "LSTM_Final",
+            fold=0,
+            num_epochs=10,
+            lr=0.001,
+            class_weight_ratio=class_weight_ratio
+        )
+
+        for epoch, (tr_loss, va_loss) in enumerate(zip(final_bilstm_train_losses, final_bilstm_val_losses), start=1):
+            training_records.append({
+                "model": "BiLSTM_Final",
+                "fold": 0,
+                "epoch": epoch,
+                "train_loss": tr_loss,
+                "val_loss": va_loss
+            })
+
+        for epoch, (tr_loss, va_loss) in enumerate(zip(final_lstm_train_losses, final_lstm_val_losses), start=1):
+            training_records.append({
+                "model": "LSTM_Final",
+                "fold": 0,
+                "epoch": epoch,
+                "train_loss": tr_loss,
+                "val_loss": va_loss
+            })
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        final_bilstm_model = final_bilstm_model.to(device)
+        final_lstm_model = final_lstm_model.to(device)
+
+        bilstm_test_probs, bilstm_test_time, bilstm_test_attention = run_inference(final_bilstm_model, test_loader, device)
+        lstm_test_probs, lstm_test_time, lstm_test_attention = run_inference(final_lstm_model, test_loader, device)
+
+        bilstm_test_metrics = compute_metrics(
+            test_labels,
+            bilstm_test_probs,
+            bilstm_test_time,
+            len(test_labels),
+            torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0,
+            bilstm_test_attention
+        )
+        lstm_test_metrics = compute_metrics(
+            test_labels,
+            lstm_test_probs,
+            lstm_test_time,
+            len(test_labels),
+            torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0,
+            lstm_test_attention
+        )
+
+        log_to_report(f"Held-out test BiLSTM F1: {bilstm_test_metrics['f1_score']:.4f}")
+        log_to_report(f"Held-out test LSTM F1: {lstm_test_metrics['f1_score']:.4f}")
         
         # Calculate average metrics
         log_to_report("\n" + "="*60)
@@ -611,14 +749,48 @@ def main():
                 'dataset_shape': data.shape,
                 'vocab_size': len(vocab),
                 'class_distribution': overall_dist,
+                'train_distribution': train_dist,
+                'test_distribution': test_dist,
                 'class_weights': class_weight_dict if 'class_weight_dict' in locals() else None
             },
             'bilstm_results': bilstm_results,
             'lstm_results': lstm_results,
             'bilstm_avg_metrics': bilstm_avg_metrics,
             'lstm_avg_metrics': lstm_avg_metrics,
-            'performance_differences': performance_diff
+            'performance_differences': performance_diff,
+            'heldout_test_metrics': {
+                'bilstm': bilstm_test_metrics,
+                'lstm': lstm_test_metrics
+            }
         }
+
+        # Persist inference artifacts and evaluation outputs
+        training_history_path = os.path.join(output_dir, "lstm_bilstm_training_history.csv")
+        save_training_history(training_records, training_history_path)
+
+        test_predictions_path = os.path.join(output_dir, "lstm_bilstm_test_predictions.csv")
+        save_test_predictions(test_labels, bilstm_test_probs, lstm_test_probs, test_predictions_path)
+
+        inference_bundle = {
+            'vocab': vocab,
+            'max_len': 200,
+            'embedding_dim': 100,
+            'hidden_dim': 128,
+            'class_weight_ratio': class_weight_ratio,
+            'label_mapping': {'negative': 0, 'positive': 1},
+            'bilstm_state_dict': final_bilstm_model.state_dict(),
+            'lstm_state_dict': final_lstm_model.state_dict()
+        }
+        torch.save(inference_bundle, os.path.join(output_dir, "lstm_bilstm_inference_bundle.pth"))
+
+        metadata = {
+            'artifact_time': datetime.now().isoformat(),
+            'training_history_file': training_history_path,
+            'test_predictions_file': test_predictions_path,
+            'inference_bundle_file': os.path.join(output_dir, "lstm_bilstm_inference_bundle.pth")
+        }
+        with open(os.path.join(output_dir, "lstm_bilstm_artifacts_metadata.json"), "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
         
         # Save to pickle
         with open('./lstm_bilstm_comparison_results.pkl', 'wb') as f:
@@ -631,6 +803,7 @@ def main():
         log_to_report("Results saved to: lstm_bilstm_comparison_results.pkl")
         log_to_report("Report saved to: LSTM_BiLSTM_Comparison_Report.md")
         log_to_report("Plots saved to: lstm_bilstm_comparison.png")
+        log_to_report(f"Training artifacts saved to: {output_dir}")
         
     except Exception as e:
         log_to_report(f"Experiment failed with error: {e}", "ERROR")

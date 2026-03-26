@@ -10,19 +10,69 @@ from sklearn.svm import SVC
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score, 
-                           classification_report, confusion_matrix, roc_curve, auc)
+                           classification_report, confusion_matrix, roc_curve, auc, log_loss)
 from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
+from imblearn.over_sampling import SMOTE
 import warnings
 import jieba
 import pickle
 from collections import Counter
 import logging
+import os
+import json
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
+
+try:
+    from tqdm.auto import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def get_results_dirs():
+    """Create and return standardized results directories."""
+    project_root = Path(__file__).resolve().parents[1]
+    base = project_root / 'results' / 'machine_learning'
+    dirs = {
+        'base': base,
+        'figures': base / 'figures',
+        'artifacts': base / 'artifacts',
+        'models': base / 'models',
+        'reports': base / 'reports'
+    }
+    for directory in dirs.values():
+        directory.mkdir(parents=True, exist_ok=True)
+    return dirs
+
+
+def set_publication_style():
+    """Apply a clean publication-oriented plotting style."""
+    plt.style.use('seaborn-v0_8-whitegrid')
+    sns.set_theme(context='paper', style='whitegrid', palette='colorblind')
+    plt.rcParams.update({
+        'font.family': 'DejaVu Serif',
+        'font.size': 11,
+        'axes.titlesize': 13,
+        'axes.labelsize': 11,
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10,
+        'legend.fontsize': 9,
+        'figure.titlesize': 14,
+        'axes.spines.top': False,
+        'axes.spines.right': False
+    })
 
 # Set random seeds for reproducibility
 random.seed(42)
@@ -57,6 +107,7 @@ class BinaryTextClassifierComparison:
         self.vectorizer = None
         self.models = {}
         self.scalers = {}
+        self.model_input_format = {}
         self.class_weights = None
         
         # Initialize models (will be updated with class weights if needed)
@@ -265,20 +316,30 @@ class BinaryTextClassifierComparison:
         # Compute sample weights for Naive Bayes
         sample_weights = self.compute_sample_weights(y_train) if self.use_class_balancing else None
         
-        for name, model in self.models.items():
+        for name, model in tqdm(self.models.items(), desc='Training models', total=len(self.models)):
             logger.info(f"Training {name}...")
             start_time = time.perf_counter()
+
+            # Default assumption: model can consume sparse input directly.
+            self.model_input_format[name] = 'sparse'
             
             # Handle different model types
             if name == 'SVM' and hasattr(X_train_tfidf, 'todense'):
                 # SVM with optional scaling
                 if X_train_tfidf.shape[0] * X_train_tfidf.shape[1] < 1000000:
-                    X_train_dense = X_train_tfidf.todense()
+                    X_train_dense = X_train_tfidf.toarray() if hasattr(X_train_tfidf, 'toarray') else np.asarray(X_train_tfidf)
                     self.scalers[name] = StandardScaler()
                     X_train_scaled = self.scalers[name].fit_transform(X_train_dense)
                     model.fit(X_train_scaled, y_train)
+                    self.model_input_format[name] = 'dense'
                 else:
                     model.fit(X_train_tfidf, y_train)
+                    self.model_input_format[name] = 'sparse'
+
+            elif name == 'SVM':
+                # SMOTE path provides dense ndarray; keep this path explicit.
+                model.fit(X_train_tfidf, y_train)
+                self.model_input_format[name] = 'dense'
                     
             elif name == 'Naive_Bayes' and self.use_class_balancing and sample_weights is not None:
                 # Naive Bayes with sample weights
@@ -290,7 +351,7 @@ class BinaryTextClassifierComparison:
                 model.fit(X_train_tfidf, y_train)
                 
             train_time = time.perf_counter() - start_time
-            logger.info(f"{name} training completed in {train_time:.3f}s")
+            logger.info(f"{name} training completed in {train_time:.4f}s")
             
             # Log class balancing info
             if self.use_class_balancing:
@@ -316,10 +377,15 @@ class BinaryTextClassifierComparison:
             
             # Apply scaling if used during training
             if name in self.scalers:
-                X_test_dense = X_test_tfidf.todense()
+                X_test_dense = X_test_tfidf.toarray() if hasattr(X_test_tfidf, 'toarray') else np.asarray(X_test_tfidf)
                 X_test_scaled = self.scalers[name].transform(X_test_dense)
                 y_pred = model.predict(X_test_scaled)
                 y_proba = model.predict_proba(X_test_scaled)
+            elif self.model_input_format.get(name) == 'dense' and hasattr(X_test_tfidf, 'todense'):
+                # SVM trained on dense data (e.g., SMOTE output) must infer on dense data too.
+                X_test_dense = X_test_tfidf.toarray() if hasattr(X_test_tfidf, 'toarray') else np.asarray(X_test_tfidf)
+                y_pred = model.predict(X_test_dense)
+                y_proba = model.predict_proba(X_test_dense)
             else:
                 y_pred = model.predict(X_test_tfidf)
                 y_proba = model.predict_proba(X_test_tfidf)
@@ -362,8 +428,10 @@ class BinaryTextClassifierComparison:
             # ROC AUC
             if y_proba.shape[1] == 2:  # Binary classification
                 roc_auc = auc(*roc_curve(y_true, y_proba[:, 1])[:2])
+                loss_value = log_loss(y_true, y_proba[:, 1], labels=[0, 1])
             else:
                 roc_auc = 0.0
+                loss_value = np.nan
             
             results[model_name] = {
                 "accuracy": accuracy,
@@ -371,6 +439,7 @@ class BinaryTextClassifierComparison:
                 "recall": recall,
                 "f1_score": f1,
                 "roc_auc": roc_auc,
+                "log_loss": loss_value,
                 "inference_time": inference_time,
                 "inference_time_per_sample": inference_time / max(num_samples, 1),
                 "samples_per_second": num_samples / max(inference_time, 1e-6)
@@ -389,6 +458,7 @@ class BinaryTextClassifierComparison:
             'vectorizer': self.vectorizer,
             'models': self.models,
             'scalers': self.scalers,
+            'model_input_format': self.model_input_format,
             'class_weights': self.class_weights,
             'use_class_balancing': self.use_class_balancing
         }
@@ -411,6 +481,7 @@ class BinaryTextClassifierComparison:
         self.vectorizer = model_data['vectorizer']
         self.models = model_data['models']
         self.scalers = model_data.get('scalers', {})
+        self.model_input_format = model_data.get('model_input_format', {})
         self.class_weights = model_data.get('class_weights', None)
         self.use_class_balancing = model_data.get('use_class_balancing', True)
         logger.info(f"All models and class weights loaded from {filepath}")
@@ -462,7 +533,7 @@ def load_and_clean_data(path):
     logger.info(f"Final cleaned data shape: {data.shape}")
     return data
 
-def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, class_distribution):
+def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, class_distribution, output_path):
     """
     Create comprehensive visualizations including class balance information.
     
@@ -472,8 +543,7 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
         class_distribution: Dictionary with class distribution statistics
     """
     # Set style for publication-quality plots
-    plt.style.use('seaborn-v0_8')
-    sns.set_palette("husl")
+    set_publication_style()
     
     # Create a large figure with multiple subplots
     fig = plt.figure(figsize=(20, 16))
@@ -601,10 +671,226 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
     
     # Continue with remaining visualization code...
     plt.tight_layout()
-    plt.savefig('./comprehensive_model_comparison_balanced.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(output_path, dpi=600, bbox_inches='tight')
+    plt.close()
     
-    logger.info("Comprehensive visualizations with class balancing info created and saved")
+    logger.info(f"Comprehensive visualizations created and saved to {output_path}")
+
+
+def apply_smote_resampling(X_train, y_train, random_state=42):
+    """Apply SMOTE on training features and labels."""
+    if hasattr(X_train, 'toarray'):
+        X_dense = X_train.toarray()
+    else:
+        X_dense = np.asarray(X_train)
+
+    try:
+        smote = SMOTE(random_state=random_state)
+        X_resampled, y_resampled = smote.fit_resample(X_dense, y_train)
+    except ValueError as e:
+        logger.warning(f"Default SMOTE failed: {e}. Retrying with k_neighbors=1")
+        smote = SMOTE(random_state=random_state, k_neighbors=1)
+        X_resampled, y_resampled = smote.fit_resample(X_dense, y_train)
+
+    return X_resampled, y_resampled
+
+
+def plot_smote_before_after(y_before, y_after, output_path='./smote_before_after_distribution.png'):
+    """Plot class distribution before and after SMOTE to show balancing effect."""
+    set_publication_style()
+    before_counts = pd.Series(y_before).value_counts().sort_index()
+    after_counts = pd.Series(y_after).value_counts().sort_index()
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    axes[0].bar(before_counts.index.astype(str), before_counts.values, color=['#f39c12', '#3498db'])
+    axes[0].set_title('Before SMOTE')
+    axes[0].set_xlabel('Class Label')
+    axes[0].set_ylabel('Sample Count')
+    axes[0].grid(True, axis='y', alpha=0.3)
+
+    axes[1].bar(after_counts.index.astype(str), after_counts.values, color=['#2ecc71', '#9b59b6'])
+    axes[1].set_title('After SMOTE')
+    axes[1].set_xlabel('Class Label')
+    axes[1].set_ylabel('Sample Count')
+    axes[1].grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=600, bbox_inches='tight')
+    plt.close()
+    logger.info(f"SMOTE distribution chart saved to {output_path}")
+
+
+def parse_llm_label(content):
+    """Parse binary label (0/1) from LLM output text."""
+    text = str(content).strip().lower()
+
+    if text in {'0', '1'}:
+        return int(text)
+
+    if 'label: 0' in text or 'predict: 0' in text or 'class 0' in text:
+        return 0
+    if 'label: 1' in text or 'predict: 1' in text or 'class 1' in text:
+        return 1
+
+    # Fallback: first digit occurrence
+    for ch in text:
+        if ch in {'0', '1'}:
+            return int(ch)
+    return None
+
+
+def build_zero_shot_prompt(text):
+    """Build zero-shot prompt for binary text classification."""
+    return (
+        "You are a strict binary text classifier for Chinese comments.\n"
+        "Task: classify the comment into one label only.\n"
+        "Label definitions:\n"
+        "- 0: Positive/Supportive feedback\n"
+        "- 1: Negative/Constructive/Critical feedback\n"
+        "Output format: only a single character, either 0 or 1.\n\n"
+        f"Comment:\n{text}\n\n"
+        "Answer:"
+    )
+
+
+def build_few_shot_prompt(text, examples):
+    """Build few-shot prompt with labeled examples."""
+    example_blocks = []
+    for i, ex in enumerate(examples, start=1):
+        example_blocks.append(
+            f"Example {i}:\n"
+            f"Comment: {ex['text']}\n"
+            f"Label: {int(ex['label'])}\n"
+        )
+
+    examples_text = "\n".join(example_blocks)
+    return (
+        "You are a strict binary text classifier for Chinese comments.\n"
+        "Task: classify the comment into one label only.\n"
+        "Label definitions:\n"
+        "- 0: Positive/Supportive feedback\n"
+        "- 1: Negative/Constructive/Critical feedback\n"
+        "Output format: only a single character, either 0 or 1.\n\n"
+        "Labeled examples:\n"
+        f"{examples_text}\n"
+        f"Comment: {text}\n"
+        "Label:"
+    )
+
+
+def select_few_shot_examples(train_texts, train_labels, max_per_class=3):
+    """Select simple balanced examples from training split for few-shot prompting."""
+    examples = []
+    for label in [0, 1]:
+        idx = np.where(train_labels == label)[0][:max_per_class]
+        for i in idx:
+            examples.append({'text': str(train_texts[i]), 'label': int(train_labels[i])})
+    return examples
+
+
+def run_groq_llm_inference(test_texts, test_labels, train_texts, train_labels, artifacts_dir,
+                           model_name='llama-3.1-8b-instant', max_samples=200):
+    """Run Groq zero-shot and few-shot inference on held-out test samples and save outputs."""
+    if Groq is None:
+        logger.warning("Groq SDK is not installed. Skipping LLM inference.")
+        return None
+
+    api_key = os.getenv('GROQ_API_KEY')
+    if not api_key:
+        logger.warning("GROQ_API_KEY not found. Skipping LLM inference.")
+        return None
+
+    client = Groq(api_key=api_key)
+
+    num_samples = min(max_samples, len(test_texts))
+    texts_eval = np.array(test_texts[:num_samples], dtype=object)
+    labels_eval = np.array(test_labels[:num_samples], dtype=int)
+
+    few_shot_examples = select_few_shot_examples(np.array(train_texts, dtype=object), np.array(train_labels, dtype=int))
+
+    outputs = {
+        'zero_shot': [],
+        'few_shot': []
+    }
+
+    for i, text in enumerate(tqdm(texts_eval, desc='Groq inference', total=len(texts_eval))):
+        # Zero-shot
+        zero_prompt = build_zero_shot_prompt(str(text))
+        zero_resp = client.chat.completions.create(
+            model=model_name,
+            temperature=0,
+            max_tokens=8,
+            messages=[{'role': 'user', 'content': zero_prompt}]
+        )
+        zero_text = zero_resp.choices[0].message.content
+        zero_pred = parse_llm_label(zero_text)
+
+        # Few-shot
+        few_prompt = build_few_shot_prompt(str(text), few_shot_examples)
+        few_resp = client.chat.completions.create(
+            model=model_name,
+            temperature=0,
+            max_tokens=8,
+            messages=[{'role': 'user', 'content': few_prompt}]
+        )
+        few_text = few_resp.choices[0].message.content
+        few_pred = parse_llm_label(few_text)
+
+        outputs['zero_shot'].append({
+            'sample_index': i,
+            'text': str(text),
+            'true_label': int(labels_eval[i]),
+            'predicted_label': int(zero_pred) if zero_pred is not None else -1,
+            'raw_response': str(zero_text)
+        })
+        outputs['few_shot'].append({
+            'sample_index': i,
+            'text': str(text),
+            'true_label': int(labels_eval[i]),
+            'predicted_label': int(few_pred) if few_pred is not None else -1,
+            'raw_response': str(few_text)
+        })
+
+    zero_df = pd.DataFrame(outputs['zero_shot'])
+    few_df = pd.DataFrame(outputs['few_shot'])
+    zero_df.to_csv(os.path.join(artifacts_dir, 'groq_zero_shot_predictions.csv'), index=False, encoding='utf-8')
+    few_df.to_csv(os.path.join(artifacts_dir, 'groq_few_shot_predictions.csv'), index=False, encoding='utf-8')
+
+    def _calc_metrics(df):
+        valid_df = df[df['predicted_label'].isin([0, 1])]
+        if len(valid_df) == 0:
+            return {
+                'evaluated_samples': 0,
+                'invalid_predictions': int(len(df)),
+                'accuracy': np.nan,
+                'precision': np.nan,
+                'recall': np.nan,
+                'f1_score': np.nan
+            }
+        y_true = valid_df['true_label'].values
+        y_pred = valid_df['predicted_label'].values
+        return {
+            'evaluated_samples': int(len(valid_df)),
+            'invalid_predictions': int(len(df) - len(valid_df)),
+            'accuracy': float(accuracy_score(y_true, y_pred)),
+            'precision': float(precision_score(y_true, y_pred, average='binary', zero_division=0)),
+            'recall': float(recall_score(y_true, y_pred, average='binary', zero_division=0)),
+            'f1_score': float(f1_score(y_true, y_pred, average='binary', zero_division=0))
+        }
+
+    metrics = {
+        'model': model_name,
+        'max_samples': int(num_samples),
+        'zero_shot': _calc_metrics(zero_df),
+        'few_shot': _calc_metrics(few_df)
+    }
+
+    with open(os.path.join(artifacts_dir, 'groq_llm_metrics.json'), 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
+
+    logger.info("Groq zero-shot and few-shot inference completed")
+    return metrics
 
 def run_comprehensive_experiment():
     """
@@ -612,6 +898,8 @@ def run_comprehensive_experiment():
     """
     # Load and prepare data
     data = load_and_clean_data('../data/two-label-data.csv')
+    result_dirs = get_results_dirs()
+    artifacts_dir = str(result_dirs['artifacts'])
     
     # Verify data integrity
     assert not data.empty, "No data loaded!"
@@ -621,17 +909,26 @@ def run_comprehensive_experiment():
     # Extract features and labels
     texts = data['text'].values
     labels = data['label'].values
+
+    # Create held-out test split for reproducible future comparison
+    cv_texts, test_texts, cv_labels, test_labels = train_test_split(
+        texts,
+        labels,
+        test_size=0.2,
+        random_state=42,
+        stratify=labels,
+        shuffle=True
+    )
     
-    # Initialize classifier comparison system with class balancing enabled
-    classifier_system = BinaryTextClassifierComparison(use_class_balancing=True)
+    # Initialize classifier comparison system. We apply SMOTE, so class weights are disabled.
+    classifier_system = BinaryTextClassifierComparison(use_class_balancing=False)
     
     # Analyze data distribution
     class_distribution = classifier_system.analyze_data_distribution(labels, "Original Data Distribution")
+    train_distribution = classifier_system.analyze_data_distribution(cv_labels, "Cross-Validation Training Distribution")
+    test_distribution = classifier_system.analyze_data_distribution(test_labels, "Held-out Test Distribution")
     
-    # Apply class weight balancing
-    if classifier_system.use_class_balancing:
-        class_weights = classifier_system.apply_class_weight_balancing(labels)
-        logger.info("Class weight balancing applied to all compatible models")
+    logger.info("SMOTE balancing is enabled for training folds")
     
     # Cross-validation setup
     n_splits = 10
@@ -645,47 +942,78 @@ def run_comprehensive_experiment():
     }
     
     logger.info(f"Starting {n_splits}-fold stratified cross-validation with class balancing...")
+    all_fold_predictions = {
+        'SVM': [],
+        'Naive_Bayes': [],
+        'Random_Forest': []
+    }
     
-    for fold, (train_idx, val_idx) in enumerate(skf.split(texts, labels)):
+    fold_iterator = list(skf.split(cv_texts, cv_labels))
+    for fold, (train_idx, val_idx) in enumerate(tqdm(fold_iterator, desc='Cross-validation folds', total=len(fold_iterator))):
         logger.info(f"\n{'='*50}")
         logger.info(f"Fold {fold+1}/{n_splits}")
         logger.info(f"{'='*50}")
         
         # Split data
-        train_texts = texts[train_idx]
-        train_labels = labels[train_idx]
-        val_texts = texts[val_idx]
-        val_labels = labels[val_idx]
+        train_texts = cv_texts[train_idx]
+        train_labels = cv_labels[train_idx]
+        val_texts = cv_texts[val_idx]
+        val_labels = cv_labels[val_idx]
         
         # Analyze fold distribution
-        fold_classifier = BinaryTextClassifierComparison(use_class_balancing=True)
+        fold_classifier = BinaryTextClassifierComparison(use_class_balancing=False)
         fold_classifier.analyze_data_distribution(train_labels, f"Fold {fold+1} Training Distribution")
         fold_classifier.analyze_data_distribution(val_labels, f"Fold {fold+1} Validation Distribution")
         
         # Transform features
         X_train_tfidf, X_val_tfidf = fold_classifier.fit_transform_features(train_texts, val_texts)
         
-        # Train all models with class balancing
-        fold_classifier.fit_models(X_train_tfidf, train_labels)
+        # Apply SMOTE on training fold and train models on balanced data
+        X_train_smote, y_train_smote = apply_smote_resampling(X_train_tfidf, train_labels, random_state=42 + fold)
+
+        if fold == 0:
+            plot_smote_before_after(
+                train_labels,
+                y_train_smote,
+                output_path=str(result_dirs['figures'] / 'smote_before_after_distribution.png')
+            )
+
+        fold_classifier.fit_models(X_train_smote, y_train_smote)
         
         # Make predictions with all models
         predictions = fold_classifier.predict_models(X_val_tfidf)
+        train_predictions = fold_classifier.predict_models(X_train_smote)
         
         # Compute metrics for all models
         fold_metrics = fold_classifier.compute_metrics(val_labels, predictions, len(val_labels))
+        train_fold_metrics = fold_classifier.compute_metrics(y_train_smote, train_predictions, len(y_train_smote))
         
         # Store results
         for model_name in fold_metrics:
+            fold_metrics[model_name]['train_log_loss'] = train_fold_metrics[model_name]['log_loss']
+            fold_metrics[model_name]['val_log_loss'] = fold_metrics[model_name]['log_loss']
             all_fold_results[model_name].append(fold_metrics[model_name])
+
+            y_pred = predictions[model_name]['predictions']
+            y_proba = predictions[model_name]['probabilities'][:, 1] if predictions[model_name]['probabilities'].shape[1] == 2 else np.zeros(len(y_pred))
+            fold_pred_df = pd.DataFrame({
+                'fold': fold + 1,
+                'sample_index': np.arange(len(val_labels)),
+                'true_label': val_labels.astype(int),
+                'predicted_label': y_pred.astype(int),
+                'predicted_prob': y_proba,
+                'model': model_name
+            })
+            all_fold_predictions[model_name].append(fold_pred_df)
             
         # Log fold results
         for model_name, metrics in fold_metrics.items():
             logger.info(f"\n{model_name} - Fold {fold+1} Results (Class Balanced):")
-            logger.info(f"Accuracy: {metrics['accuracy']:.3f}")
-            logger.info(f"Precision: {metrics['precision']:.3f}")
-            logger.info(f"Recall: {metrics['recall']:.3f}")
-            logger.info(f"F1 Score: {metrics['f1_score']:.3f}")
-            logger.info(f"ROC AUC: {metrics['roc_auc']:.3f}")
+            logger.info(f"Accuracy: {metrics['accuracy']:.4f}")
+            logger.info(f"Precision: {metrics['precision']:.4f}")
+            logger.info(f"Recall: {metrics['recall']:.4f}")
+            logger.info(f"F1 Score: {metrics['f1_score']:.4f}")
+            logger.info(f"ROC AUC: {metrics['roc_auc']:.4f}")
             logger.info(f"Inference time: {metrics['inference_time']:.4f}s")
     
     # Calculate average metrics for all models
@@ -701,8 +1029,12 @@ def run_comprehensive_experiment():
             'inference_time': np.mean([r['inference_time'] for r in model_results]),
             'inference_time_per_sample': np.mean([r['inference_time_per_sample'] for r in model_results]),
             'samples_per_second': np.mean([r['samples_per_second'] for r in model_results]),
+            'train_log_loss': np.nanmean([r['train_log_loss'] for r in model_results]),
+            'val_log_loss': np.nanmean([r['val_log_loss'] for r in model_results]),
             'std_accuracy': np.std([r['accuracy'] for r in model_results]),
-            'std_f1': np.std([r['f1_score'] for r in model_results])
+            'std_f1': np.std([r['f1_score'] for r in model_results]),
+            'std_train_log_loss': np.nanstd([r['train_log_loss'] for r in model_results]),
+            'std_val_log_loss': np.nanstd([r['val_log_loss'] for r in model_results])
         }
     
     # Print comprehensive results
@@ -717,18 +1049,17 @@ def run_comprehensive_experiment():
     print(f"Class 1 (Positive): {class_distribution['positive_count']} ({class_distribution['positive_ratio']:.1f}%)")
     print(f"Imbalance ratio: {class_distribution['imbalance_ratio']:.2f}:1")
     
-    if classifier_system.class_weights:
-        print(f"\nCLASS WEIGHTS APPLIED:")
-        for class_label, weight in classifier_system.class_weights.items():
-            print(f"Class {class_label}: {weight:.3f}")
+    print("\nSMOTE applied on each training fold to balance classes.")
     
     for model_name, metrics in avg_metrics.items():
         print(f"\n{model_name.upper()} RESULTS (CLASS BALANCED):")
-        print(f"Average Accuracy: {metrics['accuracy']:.3f} ± {metrics['std_accuracy']:.3f}")
-        print(f"Average Precision: {metrics['precision']:.3f}")
-        print(f"Average Recall: {metrics['recall']:.3f}")
-        print(f"Average F1 Score: {metrics['f1_score']:.3f} ± {metrics['std_f1']:.3f}")
-        print(f"Average ROC AUC: {metrics['roc_auc']:.3f}")
+        print(f"Average Accuracy: {metrics['accuracy']:.4f} ± {metrics['std_accuracy']:.4f}")
+        print(f"Average Precision: {metrics['precision']:.4f}")
+        print(f"Average Recall: {metrics['recall']:.4f}")
+        print(f"Average F1 Score: {metrics['f1_score']:.4f} ± {metrics['std_f1']:.4f}")
+        print(f"Average ROC AUC: {metrics['roc_auc']:.4f}")
+        print(f"Average Train Log Loss: {metrics['train_log_loss']:.4f} ± {metrics['std_train_log_loss']:.4f}")
+        print(f"Average Validation Log Loss: {metrics['val_log_loss']:.4f} ± {metrics['std_val_log_loss']:.4f}")
         print(f"Average Inference Time: {metrics['inference_time']:.4f}s")
         print(f"Average Throughput: {metrics['samples_per_second']:.0f} samples/sec")
     
@@ -742,7 +1073,7 @@ def run_comprehensive_experiment():
         best_model = max(avg_metrics.keys(), key=lambda x: avg_metrics[x][metric])
         best_score = avg_metrics[best_model][metric]
         best_models[metric] = (best_model, best_score)
-        print(f"Best {metric.replace('_', ' ').title()}: {best_model} ({best_score:.3f})")
+        print(f"Best {metric.replace('_', ' ').title()}: {best_model} ({best_score:.4f})")
     
     # Speed comparison
     fastest_model = min(avg_metrics.keys(), key=lambda x: avg_metrics[x]['inference_time'])
@@ -755,41 +1086,128 @@ def run_comprehensive_experiment():
     
     # Create visualizations
     logger.info("Creating comprehensive visualizations with class balancing info...")
-    create_comprehensive_visualizations(all_fold_results, avg_metrics, class_distribution)
+    create_comprehensive_visualizations(
+        all_fold_results,
+        avg_metrics,
+        class_distribution,
+        output_path=str(result_dirs['figures'] / 'comprehensive_model_comparison_balanced.png')
+    )
     
     # Create publication-ready plots
     logger.info("Creating publication-ready plots...")
-    create_publication_ready_plots(avg_metrics, all_fold_results)
+    create_publication_ready_plots(avg_metrics, all_fold_results, output_dir=str(result_dirs['figures']))
     
     # Statistical significance testing
     perform_statistical_analysis(all_fold_results)
     
-    # Save best models with class weights
-    logger.info("Training final models on full dataset for saving...")
-    final_classifier = BinaryTextClassifierComparison(use_class_balancing=True)
-    X_full_tfidf = final_classifier.fit_transform_features(texts)
-    final_classifier.fit_models(X_full_tfidf, labels)
-    final_classifier.save_models("./best_models_comparison_balanced")
+    # Save best models (trained on SMOTE-balanced training data)
+    logger.info("Training final models on SMOTE-balanced CV training split for saving...")
+    final_classifier = BinaryTextClassifierComparison(use_class_balancing=False)
+    X_train_tfidf, X_test_tfidf = final_classifier.fit_transform_features(cv_texts, test_texts)
+    X_train_smote_final, y_train_smote_final = apply_smote_resampling(X_train_tfidf, cv_labels, random_state=42)
+    plot_smote_before_after(
+        cv_labels,
+        y_train_smote_final,
+        output_path=str(result_dirs['figures'] / 'smote_before_after_distribution_final_train.png')
+    )
+    final_classifier.fit_models(X_train_smote_final, y_train_smote_final)
+    final_classifier.save_models(str(result_dirs['models'] / 'best_models_comparison_balanced'))
+
+    # Evaluate final models on held-out test split and persist ground truth/predictions
+    test_predictions = final_classifier.predict_models(X_test_tfidf)
+    test_metrics = final_classifier.compute_metrics(test_labels, test_predictions, len(test_labels))
+
+    # Optional LLM inference stage (Groq): zero-shot and few-shot
+    llm_metrics = run_groq_llm_inference(
+        test_texts=test_texts,
+        test_labels=test_labels,
+        train_texts=cv_texts,
+        train_labels=cv_labels,
+        artifacts_dir=artifacts_dir,
+        model_name='llama-3.1-8b-instant',
+        max_samples=200
+    )
+
+    # Create confusion matrix and train-loss charts for each model
+    create_confusion_matrix_plots(test_labels, test_predictions, output_dir=str(result_dirs['figures']))
+    create_train_loss_plots(all_fold_results, output_dir=str(result_dirs['figures']))
+
+    for model_name, pred_data in test_predictions.items():
+        y_pred = pred_data['predictions']
+        y_proba = pred_data['probabilities'][:, 1] if pred_data['probabilities'].shape[1] == 2 else np.zeros(len(y_pred))
+        test_pred_df = pd.DataFrame({
+            'sample_index': np.arange(len(test_labels)),
+            'true_label': test_labels.astype(int),
+            'predicted_label': y_pred.astype(int),
+            'predicted_prob': y_proba,
+            'model': model_name
+        })
+        test_pred_df.to_csv(
+            os.path.join(artifacts_dir, f"{model_name.lower()}_test_predictions.csv"),
+            index=False,
+            encoding='utf-8'
+        )
+
+    for model_name, fold_frames in all_fold_predictions.items():
+        if fold_frames:
+            pd.concat(fold_frames, ignore_index=True).to_csv(
+                os.path.join(artifacts_dir, f"{model_name.lower()}_cv_predictions.csv"),
+                index=False,
+                encoding='utf-8'
+            )
+
+    training_info = {
+        'experiment': 'BinaryTextClassifierComparison',
+        'total_samples': int(len(labels)),
+        'cv_training_samples': int(len(cv_labels)),
+        'heldout_test_samples': int(len(test_labels)),
+        'class_distribution_total': class_distribution,
+        'class_distribution_train': train_distribution,
+        'class_distribution_test': test_distribution,
+        'smote_training_distribution': {
+            'before': {
+                'class_0': int(np.sum(cv_labels == 0)),
+                'class_1': int(np.sum(cv_labels == 1))
+            },
+            'after': {
+                'class_0': int(np.sum(y_train_smote_final == 0)),
+                'class_1': int(np.sum(y_train_smote_final == 1))
+            }
+        },
+        'class_weights': final_classifier.class_weights,
+        'vectorizer_settings': {
+            'max_features': final_classifier.max_features,
+            'ngram_range': final_classifier.ngram_range,
+            'min_df': final_classifier.min_df,
+            'max_df': final_classifier.max_df
+        },
+        'cv_avg_metrics': avg_metrics,
+        'heldout_test_metrics': test_metrics,
+        'groq_llm_metrics': llm_metrics,
+        'saved_model_file': str(result_dirs['models'] / 'best_models_comparison_balanced_all_models.pkl')
+    }
+    with open(os.path.join(artifacts_dir, 'ml_training_info.json'), 'w', encoding='utf-8') as f:
+        json.dump(training_info, f, indent=2, ensure_ascii=False, default=float)
     
     # Generate model comparison report
-    generate_model_comparison_report(avg_metrics, all_fold_results, best_models, class_distribution)
+    generate_model_comparison_report(
+        avg_metrics,
+        all_fold_results,
+        best_models,
+        class_distribution,
+        output_path=str(result_dirs['reports'] / 'model_comparison_report_balanced.md')
+    )
     
+    logger.info(f"Training artifacts and predictions saved to {artifacts_dir}")
     return all_fold_results, avg_metrics
 
-def create_publication_ready_plots(avg_metrics_dict, fold_results_dict):
+def create_publication_ready_plots(avg_metrics_dict, fold_results_dict, output_dir='.'):
     """
     Create clean, publication-ready plots for educational journal with class balancing info.
     """
     # Set publication style
-    plt.rcParams.update({
-        'font.size': 12,
-        'axes.titlesize': 14,
-        'axes.labelsize': 12,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
-        'legend.fontsize': 10,
-        'figure.titlesize': 16
-    })
+    set_publication_style()
+    os.makedirs(output_dir, exist_ok=True)
     
     # Figure 1: Performance Metrics Comparison
     fig1, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
@@ -811,11 +1229,11 @@ def create_publication_ready_plots(avg_metrics_dict, fold_results_dict):
         # Add value labels
         for bar, val in zip(bars, values):
             ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                   f'{val:.3f}', ha='center', va='bottom')
+                   f'{val:.4f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.savefig('./publication_figure1_performance_metrics_balanced.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(output_dir, 'publication_figure1_performance_metrics_balanced.png'), dpi=600, bbox_inches='tight')
+    plt.close()
     
     # Figure 2: Computational Efficiency
     fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
@@ -843,8 +1261,8 @@ def create_publication_ready_plots(avg_metrics_dict, fold_results_dict):
                 f'{tp_val:.0f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.savefig('./publication_figure2_computational_efficiency_balanced.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(output_dir, 'publication_figure2_computational_efficiency_balanced.png'), dpi=600, bbox_inches='tight')
+    plt.close()
 
 def perform_statistical_analysis(fold_results_dict):
     """
@@ -870,11 +1288,11 @@ def perform_statistical_analysis(fold_results_dict):
             if i < j:  # Avoid duplicate comparisons
                 t_stat, p_value = stats.ttest_rel(f1_scores[model1], f1_scores[model2])
                 significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else "n.s."
-                print(f"{model1} vs {model2}: t={t_stat:.3f}, p={p_value:.4f} {significance}")
+                print(f"{model1} vs {model2}: t={t_stat:.4f}, p={p_value:.4f} {significance}")
     
     print("\nSignificance levels: *** p<0.001, ** p<0.01, * p<0.05, n.s. not significant")
 
-def generate_model_comparison_report(avg_metrics, fold_results, best_models, class_distribution):
+def generate_model_comparison_report(avg_metrics, fold_results, best_models, class_distribution, output_path):
     """
     Generate a comprehensive model comparison report for publication with class balancing info.
     """
@@ -920,14 +1338,14 @@ This report presents a comprehensive comparison of three machine learning models
 """
     
     for model, metrics in avg_metrics.items():
-        report += f"| {model} | {metrics['accuracy']:.3f} | {metrics['precision']:.3f} | {metrics['recall']:.3f} | {metrics['f1_score']:.3f} | {metrics['roc_auc']:.3f} | {metrics['inference_time']:.4f} |\n"
+        report += f"| {model} | {metrics['accuracy']:.4f} | {metrics['precision']:.4f} | {metrics['recall']:.4f} | {metrics['f1_score']:.4f} | {metrics['roc_auc']:.4f} | {metrics['inference_time']:.4f} |\n"
     
     report += f"""
 ### Best Performing Models by Metric (Class Balanced)
 
 """
     for metric, (model, score) in best_models.items():
-        report += f"- **{metric.replace('_', ' ').title()}**: {model} ({score:.3f})\n"
+        report += f"- **{metric.replace('_', ' ').title()}**: {model} ({score:.4f})\n"
     
     report += f"""
 
@@ -1027,34 +1445,26 @@ For educational journal publication, this comprehensive evaluation demonstrates 
 """
     
     # Save report to file
-    with open('./model_comparison_report_balanced.md', 'w', encoding='utf-8') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         f.write(report)
     
-    logger.info("Class-balanced model comparison report generated and saved to 'model_comparison_report_balanced.md'")
+    logger.info(f"Class-balanced model comparison report generated and saved to '{output_path}'")
 
-def create_confusion_matrix_plots(fold_results_dict, texts, labels):
+def create_confusion_matrix_plots(y_true, prediction_dict, output_dir='.'):
     """
-    Create confusion matrix plots for the final models with class balancing.
+    Create confusion matrix plots for final test predictions of each model.
     """
-    from sklearn.metrics import confusion_matrix
-    import seaborn as sns
+    os.makedirs(output_dir, exist_ok=True)
     
-    # Train final models on full dataset with class balancing
-    classifier = BinaryTextClassifierComparison(use_class_balancing=True)
-    X_tfidf = classifier.fit_transform_features(texts)
-    classifier.fit_models(X_tfidf, labels)
-    
-    # Get predictions
-    predictions = classifier.predict_models(X_tfidf)
-    
+    set_publication_style()
     # Create confusion matrices
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
     models = ['SVM', 'Naive_Bayes', 'Random_Forest']
     
     for i, model in enumerate(models):
-        y_pred = predictions[model]['predictions']
-        cm = confusion_matrix(labels, y_pred)
+        y_pred = prediction_dict[model]['predictions']
+        cm = confusion_matrix(y_true, y_pred)
         
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[i])
         axes[i].set_title(f'{model} Confusion Matrix\n(Class Balanced)')
@@ -1062,8 +1472,36 @@ def create_confusion_matrix_plots(fold_results_dict, texts, labels):
         axes[i].set_ylabel('Actual')
     
     plt.tight_layout()
-    plt.savefig('./confusion_matrices_balanced.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(output_dir, 'confusion_matrices_balanced.png'), dpi=600, bbox_inches='tight')
+    plt.close()
+
+
+def create_train_loss_plots(fold_results_dict, output_dir='.'):
+    """
+    Plot training and validation log-loss curves across folds for each model.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    set_publication_style()
+    models = ['SVM', 'Naive_Bayes', 'Random_Forest']
+    folds = range(1, len(fold_results_dict[models[0]]) + 1)
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+    for i, model in enumerate(models):
+        train_losses = [r.get('train_log_loss', np.nan) for r in fold_results_dict[model]]
+        val_losses = [r.get('val_log_loss', np.nan) for r in fold_results_dict[model]]
+
+        axes[i].plot(folds, train_losses, marker='o', linewidth=2, label='Train Log Loss')
+        axes[i].plot(folds, val_losses, marker='s', linewidth=2, label='Validation Log Loss')
+        axes[i].set_title(f'{model} Loss Across Folds')
+        axes[i].set_xlabel('Fold')
+        axes[i].grid(True, alpha=0.3)
+        if i == 0:
+            axes[i].set_ylabel('Log Loss')
+        axes[i].legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'train_loss_comparison_balanced.png'), dpi=600, bbox_inches='tight')
+    plt.close()
 
 if __name__ == "__main__":
     # Run the comprehensive experiment with class balancing
@@ -1072,13 +1510,11 @@ if __name__ == "__main__":
         print("\n" + "="*80)
         print("COMPREHENSIVE MODEL COMPARISON WITH CLASS BALANCING COMPLETED SUCCESSFULLY!")
         print("="*80)
-        print("\nGenerated files:")
-        print("- comprehensive_model_comparison_balanced.png")
-        print("- publication_figure1_performance_metrics_balanced.png") 
-        print("- publication_figure2_computational_efficiency_balanced.png")
-        print("- model_comparison_report_balanced.md")
-        print("- best_models_comparison_balanced_all_models.pkl")
-        print("- confusion_matrices_balanced.png")
+        print("\nAll outputs are stored in: ../results/machine_learning/")
+        print("- figures/")
+        print("- artifacts/")
+        print("- models/")
+        print("- reports/")
         
     except Exception as e:
         logger.error(f"Experiment failed: {e}")

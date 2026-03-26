@@ -13,6 +13,8 @@ from sklearn.model_selection import train_test_split, KFold
 from sklearn.utils.class_weight import compute_class_weight
 import warnings
 warnings.filterwarnings('ignore')
+import os
+import json
 
 # Load and analyze data
 data = pd.read_csv('../data/two-label-data.csv', encoding='utf-8')
@@ -149,6 +151,9 @@ training_config = {
 
 # Storage for results
 results = {}
+training_artifacts = {}
+artifacts_dir = './artifacts'
+os.makedirs(artifacts_dir, exist_ok=True)
 
 # Train and evaluate both models
 for model_name, config in models_config.items():
@@ -207,6 +212,25 @@ for model_name, config in models_config.items():
         'true_labels': y_true,
         'trainer': trainer
     }
+
+    training_artifacts[model_name] = {
+        'train_metrics': train_result.metrics,
+        'eval_metrics': eval_result,
+        'log_history': trainer.state.log_history,
+        'model_dir': f'./saved_model_{model_name.replace("-", "_")}'
+    }
+
+    prediction_df = pd.DataFrame({
+        'sample_index': np.arange(len(y_true)),
+        'true_label': y_true.astype(int),
+        'predicted_label': y_pred.astype(int),
+        'model': model_name
+    })
+    prediction_df.to_csv(
+        os.path.join(artifacts_dir, f"{model_name.replace('-', '_').lower()}_test_predictions.csv"),
+        index=False,
+        encoding='utf-8'
+    )
     
     # Print results
     print(f"\n{model_name} Results:")
@@ -573,8 +597,15 @@ dataset_info = {
 # Generate comprehensive markdown report
 report_file = generate_markdown_report(results, comparison_df, dataset_info, training_config)
 
+# Persist training and evaluation artifacts for future inference/comparison
+with open(os.path.join(artifacts_dir, 'bert_roberta_training_info.json'), 'w', encoding='utf-8') as f:
+    json.dump(training_artifacts, f, indent=2, ensure_ascii=False, default=str)
+
+comparison_df.to_csv(os.path.join(artifacts_dir, 'bert_roberta_metrics_summary.csv'), index=False, encoding='utf-8')
+
 print(f"\nTraining completed!")
 print(f"Best model: {best_model}")
 print(f"Models saved in respective directories")
 print(f"Visualizations saved as 'model_comparison.png' and 'confusion_matrices.png'")
 print(f"Comprehensive report saved as '{report_file}'")
+print(f"Training and test prediction artifacts saved in '{artifacts_dir}'")
