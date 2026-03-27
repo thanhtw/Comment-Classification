@@ -40,6 +40,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import Dataset, DataLoader
 
 # Import professional figure utilities
+from src.utils.data_loader import get_canonical_split
 from src.utils.figure_utils import (
     export_fold_metrics_csv,
     plot_fold_metrics_comparison,
@@ -584,40 +585,38 @@ def main():
         figures_dir = str(result_dirs['figures'])
         reports_dir = str(result_dirs['reports'])
 
-        project_root = get_project_root()
-        data_path = Path(os.getenv('DATA_FILE', str(project_root / 'data' / 'Dataset.csv')))
-
-        # Load data
+        # Use the CANONICAL split shared by all pipelines to guarantee
+        # identical held-out test sets and confusion-matrix sample counts.
         log_to_report("=== LSTM vs BiLSTM Comparison Experiment ===")
-        data = load_and_clean_data(str(data_path))
-        
+        canonical = get_canonical_split()
+        data = canonical["data"].copy()
+
         # Text preprocessing
         log_to_report("Starting text preprocessing...")
         data['processed_text'] = data['text'].apply(preprocess_chinese_text)
         log_to_report("Text preprocessing completed")
-        
+
         labels = data['label'].values
-        
+
         # Analyze overall data distribution
         overall_dist = analyze_data_distribution(labels, "Overall Dataset Distribution")
-        
-        # Build vocabulary and embeddings
+
+        # Build vocabulary and embeddings on the FULL dataset
         vocab = build_vocab(data['processed_text'].tolist())
         embeddings = load_glove_embeddings(vocab, embedding_dim=100)
         sequences = texts_to_sequences(data['processed_text'].tolist(), vocab, max_len=sequence_max_len)
 
-        # Create held-out test split for future model comparison
-        train_sequences_all, test_sequences, train_labels_all, test_labels = train_test_split(
-            sequences,
-            labels,
-            test_size=test_size,
-            random_state=42,
-            stratify=labels,
-            shuffle=True
-        )
+        # Use canonical indices to split sequences (preserving the shared split)
+        train_idx = canonical["train_indices"]
+        test_idx = canonical["test_indices"]
+        train_sequences_all = sequences[train_idx]
+        test_sequences = sequences[test_idx]
+        train_labels_all = labels[train_idx]
+        test_labels = labels[test_idx]
+        log_to_report(f"Canonical split: {len(train_labels_all)} train, {len(test_labels)} test")
         train_dist = analyze_data_distribution(train_labels_all, "Training Split Distribution")
         test_dist = analyze_data_distribution(test_labels, "Held-out Test Split Distribution")
-        
+        print(f"Canonical split: {len(train_labels_all)} train, {len(test_labels)} test")
         # Compute class weights for imbalanced data
         try:
             class_weights = compute_class_weight('balanced', classes=np.unique(train_labels_all), y=train_labels_all)

@@ -43,6 +43,7 @@ except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
 
+from src.utils.data_loader import get_canonical_split
 from src.utils.figure_utils import plot_confusion_matrix_consistent
 
 
@@ -266,28 +267,51 @@ def get_llm_results_dir() -> Path:
 
 
 def _calc_metrics(df: pd.DataFrame) -> Dict[str, float]:
-    """Calculate binary classification metrics and invalid response count."""
-    valid_df = df[df["predicted_label"].isin([0, 1])]
-    if len(valid_df) == 0:
+    """Calculate binary metrics on all held-out samples.
+
+    Invalid model responses are treated as incorrect predictions so LLM
+    confusion-matrix sample counts remain identical to other pipelines.
+    """
+    if len(df) == 0:
         return {
+            "total_samples": 0,
             "evaluated_samples": 0,
-            "invalid_predictions": int(len(df)),
+            "invalid_predictions": 0,
             "accuracy": np.nan,
             "precision": np.nan,
             "recall": np.nan,
             "f1_score": np.nan,
         }
 
-    y_true = valid_df["true_label"].values
-    y_pred = valid_df["predicted_label"].values
+    y_true, y_pred, invalid_count = _get_scoring_arrays(df)
     return {
-        "evaluated_samples": int(len(valid_df)),
-        "invalid_predictions": int(len(df) - len(valid_df)),
+        "total_samples": int(len(df)),
+        "evaluated_samples": int(len(df)),
+        "invalid_predictions": int(invalid_count),
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, average="binary", zero_division=0)),
         "recall": float(recall_score(y_true, y_pred, average="binary", zero_division=0)),
         "f1_score": float(f1_score(y_true, y_pred, average="binary", zero_division=0)),
     }
+
+
+def _get_scoring_arrays(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, int]:
+    """Return y_true/y_pred arrays for all rows, with invalid predictions penalized.
+
+    Any invalid `predicted_label` (not in {0, 1}) is mapped to the opposite of
+    the true class so it is always counted as an error while preserving the full
+    held-out sample count for confusion-matrix comparability.
+    """
+    y_true = df["true_label"].to_numpy(dtype=int)
+    raw_pred = df["predicted_label"].to_numpy(dtype=int)
+    valid_mask = np.isin(raw_pred, [0, 1])
+    invalid_count = int((~valid_mask).sum())
+
+    y_pred = raw_pred.copy()
+    if invalid_count > 0:
+        y_pred[~valid_mask] = 1 - y_true[~valid_mask]
+
+    return y_true, y_pred, invalid_count
 
 
 def _run_inference_mode(
@@ -528,19 +552,19 @@ def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=No
                     logger.debug(f"CSV not found: {csv_path}")
                 continue
             
-            # Load predictions
+            # Load predictions and score on all held-out samples.
             pred_df = pd.read_csv(csv_path, encoding="utf-8")
-            valid_df = pred_df[pred_df["predicted_label"].isin([0, 1])]
-            
-            if len(valid_df) > 0:
-                y_true = valid_df["true_label"].values
-                y_pred = valid_df["predicted_label"].values
+            if len(pred_df) > 0:
+                y_true, y_pred, invalid_count = _get_scoring_arrays(pred_df)
 
                 filename = f"llm_{safe_name}_{mode}_confusion_matrix"
                 fig = plot_confusion_matrix_consistent(
                     y_true=y_true,
                     y_pred=y_pred,
-                    title=f"{model_name} - {mode.replace('_', ' ').title()} Confusion Matrix (Held-out Test)",
+                    title=(
+                        f"{model_name} - {mode.replace('_', ' ').title()} "
+                        f"Confusion Matrix (Held-out Test, invalid={invalid_count})"
+                    ),
                     output_path=figures_dir,
                     filename_stem=filename,
                     class_labels=["No-Meaningful", "Meaningful"],
@@ -640,44 +664,19 @@ def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=No
 
 
 def _load_default_train_test_split():
-    """Load DATA_FILE and create a reproducible train/test split for standalone LLM runs."""
-    _load_env_file()
-    project_root = get_project_root()
-    # Get from environment (already resolved by _load_env_file) or use default
-    data_file_str = os.getenv("DATA_FILE")
-    if not data_file_str:
-        data_file_str = str(project_root / "data" / "Dataset.csv")
-    data_file = Path(data_file_str).resolve()
-    data = pd.read_csv(str(data_file), encoding="utf-8")
+    """Return the canonical train/test split shared by all pipelines.
 
-    if "text" not in data.columns or "label" not in data.columns:
-        raise ValueError("Dataset must contain 'text' and 'label' columns")
-
-    data = data.copy()
-    data["text"] = data["text"].astype(str)
-    data["label"] = pd.to_numeric(data["label"], errors="coerce")
-    data = data.dropna(subset=["label"]) 
-    data["label"] = data["label"].astype(int)
-
-    # Accept {1,2} labels and map to internal {1,0}.
-    if set(data["label"].unique()).issubset({1, 2}):
-        data["label"] = data["label"].replace({2: 0})
-
-    data = data[data["label"].isin([0, 1])]
-
-    texts = data["text"].to_numpy(dtype=object)
-    labels = data["label"].to_numpy(dtype=int)
-
-    train_texts, test_texts, train_labels, test_labels = train_test_split(
-        texts,
-        labels,
-        test_size=HOLDOUT_TEST_SIZE,
-        random_state=42,
-        stratify=labels,
-        shuffle=True,
+    This replaces the old per-pipeline loading so that the held-out test
+    set is identical across ML, DL, Transformer, and LLM pipelines.
+    """
+    canonical = get_canonical_split()
+    print(f"Loaded canonical split with {len(canonical['texts_train'])} train and {len(canonical['texts_test'])} test samples.")
+    return (
+        canonical["texts_train"],
+        canonical["texts_test"],
+        canonical["labels_train"],
+        canonical["labels_test"],
     )
-
-    return train_texts, test_texts, train_labels, test_labels
 
 
 def _resolve_llm_max_samples(test_size: int) -> int:

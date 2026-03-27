@@ -34,7 +34,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 from transformers import (
     AutoModelForSequenceClassification,
@@ -46,6 +46,7 @@ from transformers import (
 )
 
 # Import professional figure utilities
+from src.utils.data_loader import get_canonical_split
 from src.utils.figure_utils import (
     export_fold_metrics_csv,
     plot_confusion_matrix_consistent,
@@ -199,12 +200,34 @@ class TransformerComparisonPipeline:
             fig.savefig(self.result_dirs["figures"] / f"{filename_stem}.{fmt}", dpi=self.figure_dpi, bbox_inches="tight")
 
     def _load_data(self) -> None:
-        self.data = pd.read_csv(self.data_file, encoding="utf-8")
+        try:
+            self.data = pd.read_csv(self.data_file, encoding="utf-8", quotechar='"', skipinitialspace=True)
+        except Exception:
+            self.data = pd.read_csv(
+                self.data_file,
+                encoding="utf-8",
+                quotechar='"',
+                skipinitialspace=True,
+                on_bad_lines="skip",
+            )
+
         if "text" not in self.data.columns or "label" not in self.data.columns:
             raise ValueError("Dataset must contain 'text' and 'label' columns.")
 
-        label_to_int = {label: idx for idx, label in enumerate(sorted(self.data["label"].unique()))}
-        self.data["label"] = self.data["label"].map(label_to_int)
+        self.data = self.data.copy()
+        self.data["text"] = self.data["text"].apply(
+            lambda x: str(x).replace("\n", " ").replace("\r", " ").strip() if pd.notna(x) else ""
+        )
+        self.data = self.data[self.data["text"] != ""]
+
+        self.data["label"] = pd.to_numeric(self.data["label"], errors="coerce")
+        self.data = self.data.dropna(subset=["label"])
+        self.data["label"] = self.data["label"].astype(int)
+
+        if set(self.data["label"].unique()).issubset({1, 2}):
+            self.data["label"] = self.data["label"].replace({2: 0})
+
+        self.data = self.data[self.data["label"].isin([0, 1])]
 
         log_info(f"Dataset loaded: {self.data.shape}")
         log_info(f"Label distribution:\n{self.data['label'].value_counts()}")
@@ -315,19 +338,15 @@ class TransformerComparisonPipeline:
                 self._train_one_model_on_fold(model_name, config, fold_idx, train_df, val_df)
 
     def _prepare_holdout_split(self) -> None:
-        """Create a shared held-out test split for confusion-matrix comparability across pipelines."""
-        train_df, test_df = train_test_split(
-            self.data,
-            test_size=HOLDOUT_TEST_SIZE,
-            random_state=42,
-            stratify=self.data["label"],
-            shuffle=True,
-        )
-        self.train_data = train_df.reset_index(drop=True)
-        self.test_data = test_df.reset_index(drop=True)
-        log_info(f"Transformer train samples: {len(self.train_data)}")
-        log_info(f"Transformer held-out test samples: {len(self.test_data)}")
-
+        """Use the canonical train/test indices shared by all pipelines."""
+        canonical = get_canonical_split()
+        train_idx = canonical["train_indices"]
+        test_idx = canonical["test_indices"]
+        self.train_data = self.data.iloc[train_idx].reset_index(drop=True)
+        self.test_data = self.data.iloc[test_idx].reset_index(drop=True)
+        log_info(f"Transformer train samples (canonical): {len(self.train_data)}")
+        log_info(f"Transformer held-out test samples (canonical): {len(self.test_data)}")
+        
     def _evaluate_best_models_on_heldout_test(self) -> None:
         """Evaluate best-fold checkpoints on the shared held-out test split."""
         self.heldout_predictions = {}

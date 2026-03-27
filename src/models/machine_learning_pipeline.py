@@ -64,6 +64,7 @@ import json
 import importlib
 from pathlib import Path
 from sklearn.model_selection import train_test_split
+from src.utils.data_loader import get_canonical_split
 
 cp = None
 cuSVC = None
@@ -927,33 +928,26 @@ def run_comprehensive_experiment():
     use_gpu = False
     logger.info("Machine learning pipeline is running in CPU-only mode (sklearn).")
 
-    # Load and prepare data
-    project_root = get_project_root()
-    data_file = os.getenv('DATA_FILE', str(project_root / 'data' / 'Dataset.csv'))
-    data = load_and_clean_data(data_file)
+    # Load and prepare data using the CANONICAL split shared by all pipelines.
+    # This guarantees identical held-out test sets (and therefore identical
+    # confusion-matrix sample counts) across ML, DL, Transformer, and LLM.
+    canonical = get_canonical_split()
+    data = canonical["data"]
+    texts = data['text'].astype(str).to_numpy(dtype=object)
+    labels = pd.to_numeric(data['label'], errors='coerce').to_numpy(dtype=np.int64)
+    cv_texts = canonical["texts_train"]
+    test_texts = canonical["texts_test"]
+    cv_labels = canonical["labels_train"]
+    test_labels = canonical["labels_test"]
+    print(f"Canonical split: {len(cv_texts)} train, {len(test_texts)} test")
+
     result_dirs = get_results_dirs()
     artifacts_dir = str(result_dirs['artifacts'])
     
     # Verify data integrity
-    assert not data.empty, "No data loaded!"
-    assert 'text' in data.columns, "Text column not found!"
-    assert 'label' in data.columns, "Label column not found!"
-    
-    # Extract features and labels as plain NumPy arrays.
-    # This avoids pyarrow-backed extension arrays raising index errors when
-    # accessed with NumPy index arrays during CV splitting.
-    texts = data['text'].astype(str).to_numpy(dtype=object)
-    labels = pd.to_numeric(data['label'], errors='coerce').to_numpy(dtype=np.int64)
-
-    # Create held-out test split for reproducible future comparison
-    cv_texts, test_texts, cv_labels, test_labels = train_test_split(
-        texts,
-        labels,
-        test_size=HOLDOUT_TEST_SIZE,
-        random_state=42,
-        stratify=labels,
-        shuffle=True
-    )
+    assert len(cv_texts) > 0, "No training data!"
+    assert len(test_texts) > 0, "No test data!"
+    logger.info(f"Canonical split: {len(cv_texts)} train, {len(test_texts)} test")
     
     # Initialize classifier comparison system. We apply SMOTE, so class weights are disabled.
     classifier_system = BinaryTextClassifierComparison(use_class_balancing=False, use_gpu=use_gpu)

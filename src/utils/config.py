@@ -17,7 +17,8 @@ def get_project_root() -> Path:
     env_root = os.getenv("PROJECT_ROOT", "").strip()
     if env_root:
         return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[3]
+    # config.py is at <repo>/src/utils/config.py; repository root is parents[2].
+    return Path(__file__).resolve().parents[2]
 
 
 def load_env_file() -> None:

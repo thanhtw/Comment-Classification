@@ -1,11 +1,52 @@
-# Generated outputs
+# Generated outputs and artifacts
 results/
+*.pkl
+*.pth
+*.pt
 
-# Environment secrets
+# Environment and secrets
 .env
+.env.local
+.env.*.local
 
-# Cache directories
+# Python cache and virtual environments
 __pycache__/
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing and coverage
 .pytest_cache/
 .mypy_cache/
+.hypothesis/
+htmlcov/
+.coverage
+*.cover
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
 .cache/
+
+# Large model files (optional)
+*.tar.gz
+*.zip
+models/pretrained/
