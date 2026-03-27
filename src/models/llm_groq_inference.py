@@ -16,8 +16,15 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.model_selection import train_test_split
+
+try:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+except ImportError:
+    plt = None
+    sns = None
 
 try:
     from groq import Groq
@@ -440,7 +447,203 @@ def run_groq_llm_inference(
 
     if logger is not None:
         logger.info("Groq multi-model zero-shot and few-shot inference completed")
+    
+    # Generate visualizations
+    _create_llm_visualizations(artifacts_dir, all_metrics, logger)
+    
     return all_metrics
+
+
+def _setup_professional_style() -> None:
+    """Apply professional publication-oriented plotting style."""
+    if plt is None or sns is None:
+        return
+    
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.rcParams.update({
+        'figure.dpi': 100,
+        'savefig.dpi': 600,
+        'font.size': 11,
+        'font.family': 'sans-serif',
+        'axes.labelsize': 12,
+        'axes.titlesize': 13,
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10,
+        'legend.fontsize': 10,
+        'legend.framealpha': 0.95,
+        'axes.grid': True,
+        'grid.alpha': 0.3,
+        'grid.linestyle': ':',
+    })
+    sns.set_palette("husl")
+
+
+def _save_figure_multi_format(fig: plt.Figure, output_path: Path, filename_stem: str, formats: tuple = ("png", "pdf")) -> None:
+    """Save figure in multiple formats with consistent DPI."""
+    if plt is None:
+        return
+    
+    output_path.mkdir(parents=True, exist_ok=True)
+    for fmt in formats:
+        filepath = output_path / f"{filename_stem}.{fmt}"
+        fig.savefig(filepath, dpi=600, bbox_inches='tight', format=fmt)
+
+
+def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=None) -> None:
+    """Generate confusion matrices and metrics comparison figures for LLM models."""
+    if plt is None or sns is None:
+        if logger:
+            logger.warning("matplotlib/seaborn not available. Skipping LLM visualizations.")
+        return
+    
+    _setup_professional_style()
+    output_dir = Path(artifacts_dir)
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    
+    if "models" not in metrics_dict:
+        if logger:
+            logger.warning("No models in metrics dict. Skipping visualizations.")
+        return
+    
+    models = metrics_dict["models"]
+    
+    # 1. Create confusion matrices for each model and mode
+    for model_name, model_data in models.items():
+        safe_name = model_name.lower().replace("/", "_").replace("-", "_").replace(".", "_")
+        
+        for mode in ["zero_shot", "few_shot"]:
+            csv_path = output_dir / f"groq_{safe_name}_{mode}_predictions.csv"
+            if not csv_path.exists():
+                if logger:
+                    logger.debug(f"CSV not found: {csv_path}")
+                continue
+            
+            # Load predictions
+            pred_df = pd.read_csv(csv_path, encoding="utf-8")
+            valid_df = pred_df[pred_df["predicted_label"].isin([0, 1])]
+            
+            if len(valid_df) > 0:
+                y_true = valid_df["true_label"].values
+                y_pred = valid_df["predicted_label"].values
+                cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+                
+                # Plot confusion matrix
+                fig, ax = plt.subplots(figsize=(6, 5))
+                im = ax.imshow(cm, cmap='Blues', aspect='auto')
+                ax.set_title(f"{model_name}\n{mode.replace('_', ' ').title()}", fontsize=13)
+                ax.set_xlabel("Predicted", fontsize=12)
+                ax.set_ylabel("True", fontsize=12)
+                
+                # Add text annotations
+                for i in range(2):
+                    for j in range(2):
+                        text = ax.text(j, i, cm[i, j],
+                                     ha="center", va="center",
+                                     color="white" if cm[i, j] > cm.max() / 2 else "black",
+                                     fontsize=14, fontweight='bold')
+                
+                ax.set_xticks([0, 1])
+                ax.set_yticks([0, 1])
+                ax.set_xticklabels(['No-meaningful', 'Meaningful'])
+                ax.set_yticklabels(['No-meaningful', 'Meaningful'])
+                
+                plt.colorbar(im, ax=ax, label="Count")
+                plt.tight_layout()
+                
+                filename = f"llm_{safe_name}_{mode}_confusion_matrix"
+                _save_figure_multi_format(fig, figures_dir, filename, ("png", "pdf"))
+                plt.close(fig)
+                
+                if logger:
+                    logger.info(f"Saved confusion matrix: {figures_dir / (filename + '.png')}")
+    
+    # 2. Create metrics comparison bar chart (zero-shot vs few-shot)
+    models_with_valid_metrics = []
+    zero_shot_metrics = []
+    few_shot_metrics = []
+    
+    for model_name, model_data in models.items():
+        zero_metrics = model_data.get("zero_shot", {})
+        few_metrics = model_data.get("few_shot", {})
+        
+        if (zero_metrics.get("evaluated_samples", 0) > 0 or few_metrics.get("evaluated_samples", 0) > 0):
+            models_with_valid_metrics.append(model_name)
+            zero_shot_metrics.append(zero_metrics)
+            few_shot_metrics.append(few_metrics)
+    
+    if models_with_valid_metrics:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        metrics_names = ['accuracy', 'precision', 'recall', 'f1_score']
+        x = np.arange(len(models_with_valid_metrics))
+        width = 0.08
+        
+        for i, metric in enumerate(metrics_names):
+            zero_values = [float(m.get(metric, 0)) if not np.isnan(float(m.get(metric, 0))) else 0 
+                          for m in zero_shot_metrics]
+            few_values = [float(m.get(metric, 0)) if not np.isnan(float(m.get(metric, 0))) else 0 
+                         for m in few_shot_metrics]
+            
+            ax.bar(x + i * width - 1.5 * width, zero_values, width, label=f"{metric.replace('_', ' ').title()} (Zero-shot)")
+            ax.bar(x + i * width + 1.5 * width, few_values, width, label=f"{metric.replace('_', ' ').title()} (Few-shot)")
+        
+        # Simplify legend by removing duplicates
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), loc='upper right', fontsize=9)
+        
+        ax.set_xlabel("Model", fontsize=12)
+        ax.set_ylabel("Score", fontsize=12)
+        ax.set_title("LLM Model Performance: Zero-shot vs Few-shot", fontsize=13)
+        ax.set_xticks(x + width)
+        ax.set_xticklabels(models_with_valid_metrics, rotation=15, ha='right')
+        ax.set_ylim([0, 1.05])
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        _save_figure_multi_format(fig, figures_dir, "llm_metrics_comparison", ("png", "pdf"))
+        plt.close(fig)
+        
+        if logger:
+            logger.info(f"Saved metrics comparison: {figures_dir / 'llm_metrics_comparison.png'}")
+    
+    # 3. Create F1-score comparison chart
+    f1_data = []
+    for model_name, model_data in models.items():
+        zero_f1 = model_data.get("zero_shot", {}).get("f1_score", 0)
+        few_f1 = model_data.get("few_shot", {}).get("f1_score", 0)
+        
+        if not np.isnan(float(zero_f1)):
+            f1_data.append({"Model": f"{model_name}\n(Zero-shot)", "F1-score": float(zero_f1)})
+        if not np.isnan(float(few_f1)):
+            f1_data.append({"Model": f"{model_name}\n(Few-shot)", "F1-score": float(few_f1)})
+    
+    if f1_data:
+        f1_df = pd.DataFrame(f1_data).sort_values("F1-score", ascending=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        bars = ax.bar(f1_df["Model"], f1_df["F1-score"], color="#1f77b4", edgecolor="black")
+        
+        ax.set_title("LLM F1-Score Comparison", fontsize=13)
+        ax.set_ylabel("F1-Score", fontsize=12)
+        ax.set_ylim([0, 1.05])
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # Add value labels on bars
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{height:.4f}',
+                   ha='center', va='bottom', fontsize=10)
+        
+        plt.xticks(rotation=15, ha='right')
+        plt.tight_layout()
+        _save_figure_multi_format(fig, figures_dir, "llm_f1_score_comparison", ("png", "pdf"))
+        plt.close(fig)
+        
+        if logger:
+            logger.info(f"Saved F1-score comparison: {figures_dir / 'llm_f1_score_comparison.png'}")
 
 
 def _load_default_train_test_split():
@@ -513,6 +716,10 @@ def main() -> int:
         return 1
 
     logger.info("Standalone LLM inference completed successfully.")
+    
+    # Generate visualizations
+    _create_llm_visualizations(str(artifacts_dir), metrics, logger)
+    
     return 0
 
 
