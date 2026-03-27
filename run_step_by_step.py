@@ -228,7 +228,14 @@ def run_step(name: str, script_path: Path) -> int:
 
     start = time.perf_counter()
     cmd = [sys.executable, str(script_path)]
-    result = subprocess.run(cmd, cwd=str(Path(__file__).resolve().parent), check=False)
+    run_env = os.environ.copy()
+    run_env["PYTHONNOUSERSITE"] = "1"
+    result = subprocess.run(
+        cmd,
+        cwd=str(Path(__file__).resolve().parent),
+        check=False,
+        env=run_env,
+    )
     elapsed = time.perf_counter() - start
 
     if result.returncode == 0:

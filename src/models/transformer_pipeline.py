@@ -34,7 +34,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from transformers import (
     AutoModelForSequenceClassification,
@@ -48,6 +48,7 @@ from transformers import (
 # Import professional figure utilities
 from src.utils.figure_utils import (
     export_fold_metrics_csv,
+    plot_confusion_matrix_consistent,
     plot_fold_metrics_comparison,
     plot_metrics_panel,
     plot_loss_comparison,
@@ -59,6 +60,8 @@ warnings.filterwarnings("ignore")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+HOLDOUT_TEST_SIZE = 0.2
 
 
 def log_info(message: str) -> None:
@@ -149,8 +152,11 @@ class TransformerComparisonPipeline:
         }
 
         self.data = None
+        self.train_data = None
+        self.test_data = None
         self.fold_results = {name: [] for name in self.models_config.keys()}
         self.best_fold_records = {}
+        self.heldout_predictions = {}
         self.figure_dpi = 600
         self.figure_formats = ("png", "pdf")
 
@@ -299,14 +305,85 @@ class TransformerComparisonPipeline:
 
     def _run_cross_validation(self) -> None:
         skf = StratifiedKFold(n_splits=self.num_folds, shuffle=True, random_state=42)
-        X = self.data["text"].to_numpy(dtype=object)
-        y = self.data["label"].to_numpy(dtype=int)
+        X = self.train_data["text"].to_numpy(dtype=object)
+        y = self.train_data["label"].to_numpy(dtype=int)
 
         for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y), start=1):
-            train_df = self.data.iloc[train_idx].copy()
-            val_df = self.data.iloc[val_idx].copy()
+            train_df = self.train_data.iloc[train_idx].copy()
+            val_df = self.train_data.iloc[val_idx].copy()
             for model_name, config in self.models_config.items():
                 self._train_one_model_on_fold(model_name, config, fold_idx, train_df, val_df)
+
+    def _prepare_holdout_split(self) -> None:
+        """Create a shared held-out test split for confusion-matrix comparability across pipelines."""
+        train_df, test_df = train_test_split(
+            self.data,
+            test_size=HOLDOUT_TEST_SIZE,
+            random_state=42,
+            stratify=self.data["label"],
+            shuffle=True,
+        )
+        self.train_data = train_df.reset_index(drop=True)
+        self.test_data = test_df.reset_index(drop=True)
+        log_info(f"Transformer train samples: {len(self.train_data)}")
+        log_info(f"Transformer held-out test samples: {len(self.test_data)}")
+
+    def _evaluate_best_models_on_heldout_test(self) -> None:
+        """Evaluate best-fold checkpoints on the shared held-out test split."""
+        self.heldout_predictions = {}
+
+        for model_name, rec in self.best_fold_records.items():
+            best_dir = Path(rec["model_dir"])
+            model_cfg = self.models_config[model_name]
+            tokenizer = model_cfg["tokenizer_class"].from_pretrained(str(best_dir))
+            model = model_cfg["model_class"].from_pretrained(str(best_dir))
+
+            test_dataset = Dataset.from_pandas(self.test_data[["text", "label"]], preserve_index=False)
+
+            def tokenize_function(examples):
+                return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=200)
+
+            tokenized_test = test_dataset.map(tokenize_function, batched=True)
+
+            test_args = TrainingArguments(
+                output_dir=str(self.result_dirs["runs"] / f"{model_name.replace('-', '_')}_heldout_eval"),
+                per_device_eval_batch_size=self.training_config["per_device_eval_batch_size"],
+                dataloader_drop_last=False,
+                fp16=self.training_config["fp16"],
+                report_to=[],
+            )
+
+            trainer = Trainer(
+                model=model,
+                args=test_args,
+                compute_metrics=self.compute_metrics,
+            )
+
+            pred_output = trainer.predict(tokenized_test)
+            y_pred = np.argmax(pred_output.predictions, axis=1).astype(int)
+            y_true = pred_output.label_ids.astype(int)
+
+            self.heldout_predictions[model_name] = {
+                "y_true": y_true,
+                "y_pred": y_pred,
+            }
+
+            pd.DataFrame(
+                {
+                    "sample_index": np.arange(len(y_true)),
+                    "true_label": y_true,
+                    "predicted_label": y_pred,
+                    "model": model_name,
+                }
+            ).to_csv(
+                self.result_dirs["artifacts"] / f"{model_name.replace('-', '_').lower()}_heldout_test_predictions.csv",
+                index=False,
+                encoding="utf-8",
+            )
+
+            del trainer, model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def _build_best_fold_comparison_df(self) -> pd.DataFrame:
         rows = []
@@ -331,8 +408,8 @@ class TransformerComparisonPipeline:
         output_path = self.result_dirs["figures"]
         export_fold_metrics_csv(self.fold_results, output_path, "transformer_fold_metrics")
         
-        # Create metrics panel (2x2)
-        plot_metrics_panel(self.fold_results, output_path, "transformer_metrics_panel")
+        # Create separate metrics figures
+        plot_metrics_panel(self.fold_results, output_path, "transformer_metrics_panel", separate=True)
         
         # Create loss comparison if available
         loss_fig = plot_loss_comparison(self.fold_results, output_path, "transformer_loss_comparison")
@@ -358,39 +435,28 @@ class TransformerComparisonPipeline:
         plt.close(fig)
 
     def _plot_confusion_matrices(self) -> None:
-        """Create individual confusion matrix visualizations with best fold in filename."""
-        self._set_publication_style()
-        model_names = list(self.best_fold_records.keys())
+        """Create individual confusion matrix visualizations on held-out test split."""
+        model_names = list(self.heldout_predictions.keys())
 
         for model_name in model_names:
-            fig, ax = plt.subplots(figsize=(8, 7))
-            rec = self.best_fold_records[model_name]
-            cm = confusion_matrix(rec["y_true"], rec["y_pred"])
-            disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["No-Meaningful", "Meaningful"])
-            disp.plot(ax=ax, cmap="Blues", colorbar=True, values_format="d")
-            
-            best_fold = rec['best_fold']
-            ax.set_title(f"{model_name} - Confusion Matrix (Best Fold {best_fold})", 
-                        fontsize=13, fontweight='bold')
-            ax.grid(False)
-            
-            # Add accuracy info
-            accuracy = np.trace(cm) / np.sum(cm)
-            ax.text(0.5, -0.15, f'Accuracy: {accuracy:.4f}', ha='center', va='top',
-                   transform=ax.transAxes, fontsize=11, fontweight='bold')
-            
-            plt.tight_layout()
-            filename_stem = f"transformer_confusion_matrix_{model_name.lower()}_best_fold_{best_fold}"
+            rec = self.heldout_predictions[model_name]
+            filename_stem = f"transformer_confusion_matrix_{model_name.lower()}_heldout_test"
             self.result_dirs["figures"].mkdir(parents=True, exist_ok=True)
-            
-            for fmt in self.figure_formats:
-                fig.savefig(self.result_dirs["figures"] / f"{filename_stem}.{fmt}", dpi=self.figure_dpi, bbox_inches="tight")
-            
+
+            fig = plot_confusion_matrix_consistent(
+                y_true=rec["y_true"],
+                y_pred=rec["y_pred"],
+                title=f"{model_name} - Confusion Matrix (Held-out Test)",
+                output_path=self.result_dirs["figures"],
+                filename_stem=filename_stem,
+                class_labels=["No-Meaningful", "Meaningful"],
+                formats=self.figure_formats,
+            )
             plt.close(fig)
 
     def _log_classification_reports(self) -> None:
-        for model_name, rec in self.best_fold_records.items():
-            log_info(f"\n{model_name} - Best Fold {rec['best_fold']} Classification Report:")
+        for model_name, rec in self.heldout_predictions.items():
+            log_info(f"\n{model_name} - Held-out Test Classification Report:")
             log_info("-" * 60)
             log_info(
                 classification_report(
@@ -470,6 +536,8 @@ class TransformerComparisonPipeline:
             "experiment": "TransformerComparisonPipeline",
             "num_folds": self.num_folds,
             "total_samples": int(len(self.data)),
+            "cv_training_samples": int(len(self.train_data)),
+            "heldout_test_samples": int(len(self.test_data)),
             "fold_results_file": str(fold_results_path),
             "best_fold_summary": best_fold_summary,
             "report_file": report_file,
@@ -479,7 +547,9 @@ class TransformerComparisonPipeline:
 
     def run(self) -> None:
         self._load_data()
+        self._prepare_holdout_split()
         self._run_cross_validation()
+        self._evaluate_best_models_on_heldout_test()
 
         comparison_df = self._build_best_fold_comparison_df()
         log_info("\nTransformer best-fold summary:")

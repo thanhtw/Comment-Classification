@@ -28,12 +28,13 @@ import pandas as pd
 import pickle
 import random
 import re
+import seaborn as sns
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import time
 import warnings
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import Dataset, DataLoader
@@ -52,6 +53,8 @@ from src.utils.figure_utils import (
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+HOLDOUT_TEST_SIZE = 0.2
 
 
 def get_project_root():
@@ -115,18 +118,73 @@ def save_training_history(training_records, output_path):
     log_to_report(f"Training history saved to: {output_path}")
 
 
-def save_test_predictions(test_labels, bilstm_probs, lstm_probs, output_path):
+def save_test_predictions(test_labels, bilstm_probs, lstm_probs, output_path, bilstm_threshold=0.5, lstm_threshold=0.5):
     """Persist test ground truth and model predictions for future comparison."""
     predictions_df = pd.DataFrame({
         "sample_index": np.arange(len(test_labels)),
         "true_label": test_labels.astype(int),
         "bilstm_pred_prob": bilstm_probs,
-        "bilstm_pred_label": (bilstm_probs > 0.5).astype(int),
+        "bilstm_pred_label": (bilstm_probs > bilstm_threshold).astype(int),
         "lstm_pred_prob": lstm_probs,
-        "lstm_pred_label": (lstm_probs > 0.5).astype(int)
+        "lstm_pred_label": (lstm_probs > lstm_threshold).astype(int)
     })
     predictions_df.to_csv(output_path, index=False, encoding="utf-8")
     log_to_report(f"Test predictions saved to: {output_path}")
+
+
+def create_heldout_confusion_matrices(
+    test_labels,
+    bilstm_probs,
+    lstm_probs,
+    figures_dir,
+    bilstm_threshold=0.5,
+    lstm_threshold=0.5,
+):
+    """Create confusion-matrix figures for held-out test predictions (BiLSTM/LSTM)."""
+    setup_professional_style()
+    figures_dir = Path(figures_dir)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.asarray(test_labels).astype(int)
+    pred_map = {
+        "bilstm": (np.asarray(bilstm_probs) > bilstm_threshold).astype(int),
+        "lstm": (np.asarray(lstm_probs) > lstm_threshold).astype(int),
+    }
+
+    for model_key, y_pred in pred_map.items():
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+        fig, ax = plt.subplots(figsize=(8, 7))
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            ax=ax,
+            cbar=True,
+            cbar_kws={'label': 'Count'},
+            annot_kws={'fontsize': 14, 'fontweight': 'bold'}
+        )
+        ax.set_title(f"{model_key.upper()} - Confusion Matrix (Held-out Test)", fontsize=13, fontweight="bold")
+        ax.set_xlabel("Predicted Label", fontsize=12, fontweight='bold')
+        ax.set_ylabel("True Label", fontsize=12, fontweight='bold')
+        ax.set_xticklabels(["No-Meaningful", "Meaningful"], rotation=45, ha='right')
+        ax.set_yticklabels(["No-Meaningful", "Meaningful"], rotation=0)
+
+        accuracy = (np.trace(cm) / np.sum(cm)) if np.sum(cm) > 0 else 0.0
+        ax.text(
+            0.5,
+            -0.12,
+            f"Accuracy: {accuracy:.4f} | Samples: {np.sum(cm)}",
+            ha="center",
+            va="top",
+            transform=ax.transAxes,
+            fontsize=10,
+            fontweight="bold",
+        )
+        ax.grid(False)
+        plt.tight_layout()
+        save_figure_multi_format(fig, figures_dir, f"deep_learning_confusion_matrix_{model_key}_heldout_test", ("png", "pdf"))
+        plt.close(fig)
 
 
 def run_inference(model, data_loader, device):
@@ -359,11 +417,11 @@ class TextDataset(Dataset):
         return self.sequences[idx], self.labels[idx]
 
 # 6. Evaluation metrics
-def compute_metrics(y_true, y_pred, inference_time, num_samples, gpu_mem_usage, attention_weight):
+def compute_metrics(y_true, y_pred, inference_time, num_samples, gpu_mem_usage, attention_weight, threshold=0.5):
     """Compute evaluation metrics for binary classification"""
     
     # Ensure y_pred is binary
-    y_pred_binary = (y_pred > 0.5).astype(int)
+    y_pred_binary = (y_pred > threshold).astype(int)
     
     try:
         precision = precision_score(y_true, y_pred_binary, zero_division=0)
@@ -383,8 +441,36 @@ def compute_metrics(y_true, y_pred, inference_time, num_samples, gpu_mem_usage, 
         "inference_time_per_sample": inference_time / max(num_samples, 1),
         "samples_per_second": max(num_samples, 1) / max(inference_time, 1e-6),
         "gpu_mem_usage": gpu_mem_usage,
-        "avg_attention_weight": attention_weight
+        "avg_attention_weight": attention_weight,
+        "decision_threshold": float(threshold),
     }
+
+
+def find_best_threshold(y_true, y_prob):
+    """Find threshold maximizing F1 on calibration data."""
+    y_true = np.asarray(y_true).astype(int)
+    y_prob = np.asarray(y_prob).astype(float)
+
+    candidates = np.unique(
+        np.concatenate(
+            [
+                np.array([0.30, 0.40, 0.50, 0.60, 0.70]),
+                np.quantile(y_prob, [0.10, 0.25, 0.50, 0.75, 0.90]),
+            ]
+        )
+    )
+    candidates = np.clip(candidates, 0.0, 1.0)
+
+    best_threshold = 0.5
+    best_f1 = -1.0
+    for threshold in candidates:
+        y_pred = (y_prob > threshold).astype(int)
+        current_f1 = f1_score(y_true, y_pred, zero_division=0)
+        if current_f1 > best_f1:
+            best_f1 = current_f1
+            best_threshold = float(threshold)
+
+    return best_threshold, best_f1
 
 # 7. Training function
 def train_model(model, train_loader, val_loader, model_name, fold, num_epochs=10, lr=0.001, class_weight_ratio=None):
@@ -489,7 +575,7 @@ def analyze_data_distribution(labels, title="Data Distribution"):
 # Main execution
 def main():
     try:
-        test_size = 0.2
+        test_size = HOLDOUT_TEST_SIZE
         sequence_max_len = 200
         num_folds = 10
 
@@ -677,6 +763,7 @@ def main():
         full_train_dataset = TextDataset(train_sequences_all, train_labels_all)
         test_dataset = TextDataset(test_sequences, test_labels)
         full_train_loader = DataLoader(full_train_dataset, batch_size=32, shuffle=True)
+        full_train_calib_loader = DataLoader(full_train_dataset, batch_size=32, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
         final_bilstm_model = BiLSTMClassifier(
@@ -732,13 +819,22 @@ def main():
         bilstm_test_probs, bilstm_test_time, bilstm_test_attention = run_inference(final_bilstm_model, test_loader, device)
         lstm_test_probs, lstm_test_time, lstm_test_attention = run_inference(final_lstm_model, test_loader, device)
 
+        # Calibrate thresholds on training split to avoid degenerate one-class predictions.
+        bilstm_train_probs, _, _ = run_inference(final_bilstm_model, full_train_calib_loader, device)
+        lstm_train_probs, _, _ = run_inference(final_lstm_model, full_train_calib_loader, device)
+        bilstm_threshold, bilstm_train_f1 = find_best_threshold(train_labels_all, bilstm_train_probs)
+        lstm_threshold, lstm_train_f1 = find_best_threshold(train_labels_all, lstm_train_probs)
+        log_to_report(f"Calibrated BiLSTM threshold: {bilstm_threshold:.4f} (train F1={bilstm_train_f1:.4f})")
+        log_to_report(f"Calibrated LSTM threshold: {lstm_threshold:.4f} (train F1={lstm_train_f1:.4f})")
+
         bilstm_test_metrics = compute_metrics(
             test_labels,
             bilstm_test_probs,
             bilstm_test_time,
             len(test_labels),
             torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0,
-            bilstm_test_attention
+            bilstm_test_attention,
+            threshold=bilstm_threshold,
         )
         lstm_test_metrics = compute_metrics(
             test_labels,
@@ -746,7 +842,8 @@ def main():
             lstm_test_time,
             len(test_labels),
             torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0,
-            lstm_test_attention
+            lstm_test_attention,
+            threshold=lstm_threshold,
         )
 
         log_to_report(f"Held-out test BiLSTM F1: {bilstm_test_metrics['f1_score']:.4f}")
@@ -869,7 +966,22 @@ def main():
         save_training_history(training_records, training_history_path)
 
         test_predictions_path = os.path.join(output_dir, "lstm_bilstm_test_predictions.csv")
-        save_test_predictions(test_labels, bilstm_test_probs, lstm_test_probs, test_predictions_path)
+        save_test_predictions(
+            test_labels,
+            bilstm_test_probs,
+            lstm_test_probs,
+            test_predictions_path,
+            bilstm_threshold=bilstm_threshold,
+            lstm_threshold=lstm_threshold,
+        )
+        create_heldout_confusion_matrices(
+            test_labels,
+            bilstm_test_probs,
+            lstm_test_probs,
+            figures_dir,
+            bilstm_threshold=bilstm_threshold,
+            lstm_threshold=lstm_threshold,
+        )
 
         inference_bundle = {
             'vocab': vocab,
@@ -925,8 +1037,8 @@ def create_comparison_plots(bilstm_results, lstm_results, bilstm_avg_metrics, ls
     # Export per-fold metrics to CSV
     export_fold_metrics_csv(fold_results_dict, output_dir, "dl_fold_metrics")
     
-    # Figure 1: Metrics Panel (2x2)
-    plot_metrics_panel(fold_results_dict, output_dir, "dl_metrics_panel")
+    # Figure 1-4: Separate metrics figures
+    plot_metrics_panel(fold_results_dict, output_dir, "dl_metrics_panel", separate=True)
     
     # Figure 2: Loss Comparison
     loss_fig = plot_loss_comparison(fold_results_dict, output_dir, "dl_loss_comparison")

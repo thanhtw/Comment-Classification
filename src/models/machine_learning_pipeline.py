@@ -38,6 +38,7 @@ from src.utils.figure_utils import (
     plot_fold_metrics_comparison,
     plot_metrics_panel,
     plot_model_comparison_bar,
+    plot_confusion_matrix_consistent,
     setup_professional_style,
     save_figure_multi_format
 )
@@ -80,6 +81,8 @@ except ImportError:
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+HOLDOUT_TEST_SIZE = 0.2
 
 LABEL_MEANINGFUL = 1
 LABEL_NO_MEANINGFUL = 0
@@ -691,8 +694,8 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
     # 1. Class Distribution Visualization (Pie Chart)
     fig, ax = plt.subplots(figsize=(8, 6))
     labels = [
-        f"Label 0 ({LABEL_DISPLAY_NAMES[LABEL_NO_MEANINGFUL]})",
-        f"Label 1 ({LABEL_DISPLAY_NAMES[LABEL_MEANINGFUL]})",
+        f"{LABEL_DISPLAY_NAMES[LABEL_NO_MEANINGFUL]}",
+        f"{LABEL_DISPLAY_NAMES[LABEL_MEANINGFUL]}",
     ]
     counts = [class_distribution['negative_count'], class_distribution['positive_count']]
     colors = ['#e74c3c', '#3498db']
@@ -946,7 +949,7 @@ def run_comprehensive_experiment():
     cv_texts, test_texts, cv_labels, test_labels = train_test_split(
         texts,
         labels,
-        test_size=0.2,
+        test_size=HOLDOUT_TEST_SIZE,
         random_state=42,
         stratify=labels,
         shuffle=True
@@ -1080,8 +1083,8 @@ def run_comprehensive_experiment():
     # Print class distribution summary
     print(f"\nDATASET STATISTICS:")
     print(f"Total samples: {class_distribution['total_samples']}")
-    print(f"Label 0 ({LABEL_DISPLAY_NAMES[LABEL_NO_MEANINGFUL]}): {class_distribution['negative_count']} ({class_distribution['negative_ratio']:.1f}%)")
-    print(f"Label 1 ({LABEL_DISPLAY_NAMES[LABEL_MEANINGFUL]}): {class_distribution['positive_count']} ({class_distribution['positive_ratio']:.1f}%)")
+    print(f"{LABEL_DISPLAY_NAMES[LABEL_NO_MEANINGFUL]}: {class_distribution['negative_count']} ({class_distribution['negative_ratio']:.1f}%)")
+    print(f"{LABEL_DISPLAY_NAMES[LABEL_MEANINGFUL]}: {class_distribution['positive_count']} ({class_distribution['positive_ratio']:.1f}%)")
     print(f"Imbalance ratio: {class_distribution['imbalance_ratio']:.2f}:1")
     
     print("\nSMOTE applied on each training fold to balance classes.")
@@ -1279,8 +1282,8 @@ def create_publication_ready_plots(avg_metrics_dict, fold_results_dict, output_d
     # Export per-fold metrics to CSV for reproducibility
     export_fold_metrics_csv(fold_results_dict, output_path, "ml_fold_metrics")
     
-    # Figure 1: 2x2 Panel of Metrics Across Folds
-    plot_metrics_panel(fold_results_dict, output_path, "ml_metrics_panel")
+    # Figure 1-4: Separate metrics figures across folds
+    plot_metrics_panel(fold_results_dict, output_path, "ml_metrics_panel", separate=True)
     
     # Figure 2: Model Performance Comparison (Average Metrics)
     plot_model_comparison_bar(
@@ -1334,8 +1337,8 @@ This report presents a comprehensive comparison of three machine learning models
 
 - **Total Samples**: {class_distribution['total_samples']}
 - **Class Distribution**: 
-    - Label 0 (No-meaningful): {class_distribution['negative_count']} samples ({class_distribution['negative_ratio']:.1f}%)
-    - Label 1 (Meaningful): {class_distribution['positive_count']} samples ({class_distribution['positive_ratio']:.1f}%)
+    - No-meaningful: {class_distribution['negative_count']} samples ({class_distribution['negative_ratio']:.1f}%)
+    - Meaningful: {class_distribution['positive_count']} samples ({class_distribution['positive_ratio']:.1f}%)
 - **Imbalance Ratio**: {class_distribution['imbalance_ratio']:.2f}:1
 - **Language**: Chinese text with binary labels (0/1)
 - **Preprocessing**: Jieba word segmentation, TF-IDF vectorization
@@ -1481,35 +1484,25 @@ def create_confusion_matrix_plots(y_true, prediction_dict, output_dir='.'):
     """
     Create separate confusion matrix plots for each model on test predictions.
     """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    set_publication_style()
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
     models = ['SVM', 'Naive_Bayes', 'Random_Forest']
     model_display_names = {'SVM': 'SVM', 'Naive_Bayes': 'Naive Bayes', 'Random_Forest': 'Random Forest'}
     
     for model in models:
-        fig, ax = plt.subplots(figsize=(8, 7))
         y_pred = prediction_dict[model]['predictions']
-        cm = confusion_matrix(y_true, y_pred)
-        
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar=True, 
-                   cbar_kws={'label': 'Count'}, annot_kws={'fontsize': 14, 'fontweight': 'bold'})
-        ax.set_title(f'{model_display_names[model]} - Confusion Matrix (Test Set)', 
-                    fontsize=13, fontweight='bold')
-        ax.set_xlabel('Predicted Label', fontsize=12, fontweight='bold')
-        ax.set_ylabel('True Label', fontsize=12, fontweight='bold')
-        ax.set_xticklabels(['No-Meaningful', 'Meaningful'], rotation=45, ha='right')
-        ax.set_yticklabels(['No-Meaningful', 'Meaningful'], rotation=0)
-        
-        # Add accuracy info
-        accuracy = np.trace(cm) / np.sum(cm)
-        ax.text(0.5, -0.15, f'Accuracy: {accuracy:.4f}', ha='center', va='top',
-               transform=ax.transAxes, fontsize=11, fontweight='bold')
-        
-        plt.tight_layout()
+
         filename_base = f'ml_confusion_matrix_{model.lower()}'
-        plt.savefig(os.path.join(output_dir, f'{filename_base}.png'), dpi=600, bbox_inches='tight')
-        plt.savefig(os.path.join(output_dir, f'{filename_base}.pdf'), dpi=600, bbox_inches='tight')
+        fig = plot_confusion_matrix_consistent(
+            y_true=y_true,
+            y_pred=y_pred,
+            title=f"{model_display_names[model]} - Confusion Matrix (Held-out Test)",
+            output_path=output_path,
+            filename_stem=filename_base,
+            class_labels=['No-Meaningful', 'Meaningful'],
+            formats=("png", "pdf"),
+        )
         plt.close(fig)
     
     logger.info(f"Separate confusion matrix plots created in {output_dir}")

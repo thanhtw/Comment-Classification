@@ -73,6 +73,70 @@ def save_figure_multi_format(
         fig.savefig(filepath, dpi=600, bbox_inches='tight', format=fmt)
 
 
+def plot_confusion_matrix_consistent(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    title: str,
+    output_path: Optional[Path] = None,
+    filename_stem: str = "confusion_matrix",
+    class_labels: Optional[List[str]] = None,
+    formats: Tuple[str, ...] = ("png", "pdf"),
+) -> plt.Figure:
+    """Render one confusion matrix with consistent style and pixel layout.
+
+    This function is intended to be shared by all pipelines so axis rotation,
+    text placement, and sizing are identical across outputs.
+    """
+    setup_professional_style()
+
+    if class_labels is None:
+        class_labels = ["No-Meaningful", "Meaningful"]
+
+    y_true_arr = np.asarray(y_true).astype(int)
+    y_pred_arr = np.asarray(y_pred).astype(int)
+    cm = np.zeros((2, 2), dtype=int)
+    for t, p in zip(y_true_arr, y_pred_arr):
+        if t in (0, 1) and p in (0, 1):
+            cm[t, p] += 1
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt='d',
+        cmap='Blues',
+        ax=ax,
+        cbar=True,
+        cbar_kws={'label': 'Count'},
+        annot_kws={'fontsize': 14, 'fontweight': 'bold'},
+    )
+
+    ax.set_title(title, fontsize=13, fontweight='bold', pad=10)
+    ax.set_xlabel('Predicted Label', fontsize=12, fontweight='bold')
+    ax.set_ylabel('True Label', fontsize=12, fontweight='bold')
+    ax.set_xticklabels(class_labels, rotation=0, ha='center')
+    ax.set_yticklabels(class_labels, rotation=0)
+    ax.grid(False)
+
+    total = int(np.sum(cm))
+    accuracy = float(np.trace(cm) / total) if total > 0 else 0.0
+    # Keep summary text outside axes to avoid overlap with tick labels.
+    fig.text(
+        0.5,
+        0.03,
+        f'Accuracy: {accuracy:.4f} | Samples: {total}',
+        ha='center',
+        va='bottom',
+        fontsize=11,
+        fontweight='bold',
+    )
+
+    fig.subplots_adjust(bottom=0.18, top=0.90)
+    if output_path is not None:
+        save_figure_multi_format(fig, output_path, filename_stem, formats)
+    return fig
+
+
 def plot_fold_metrics_comparison(
     fold_results_dict: Dict[str, List[Dict]],
     metric_name: str = "accuracy",
@@ -129,7 +193,8 @@ def plot_metrics_panel(
     fold_results_dict: Dict[str, List[Dict]],
     output_path: Optional[Path] = None,
     filename_stem: str = "metrics_panel",
-    models: Optional[List[str]] = None
+    models: Optional[List[str]] = None,
+    separate: bool = False
 ) -> Optional[plt.Figure]:
     """Create 2x2 panel of fold metrics: accuracy, precision, recall, F1.
     
@@ -138,6 +203,7 @@ def plot_metrics_panel(
         output_path: Directory to save figure (None for no save)
         filename_stem: Filename without extension
         models: List of model names to include (None for all)
+        separate: If True, save one figure per metric instead of a 2x2 panel
         
     Returns:
         Matplotlib figure object
@@ -148,6 +214,48 @@ def plot_metrics_panel(
         models = list(fold_results_dict.keys())
     
     metrics = ["accuracy", "precision", "recall", "f1_score"]
+    color_cycle = sns.color_palette("tab10", n_colors=max(len(models), 3))
+    model_color_map = {}
+    for idx, model in enumerate(models):
+        model_color_map[model] = COLORS_MODELS.get(model, color_cycle[idx % len(color_cycle)])
+
+    if separate:
+        last_fig = None
+        for metric in metrics:
+            fig, ax = plt.subplots(figsize=(12, 6))
+            num_folds = len(fold_results_dict[models[0]])
+            folds = np.arange(1, num_folds + 1)
+
+            for model in models:
+                values = [fold.get(metric, np.nan) for fold in fold_results_dict[model]]
+                ax.plot(
+                    folds,
+                    values,
+                    marker='o',
+                    label=model,
+                    linewidth=2.5,
+                    markersize=7,
+                    color=model_color_map[model],
+                    alpha=0.85
+                )
+
+            metric_title = metric.replace('_', ' ').title()
+            ax.set_xlabel("Fold", fontsize=11)
+            ax.set_ylabel(metric_title, fontsize=11)
+            ax.set_title(f"{metric_title} Across Folds", fontsize=12)
+            ax.set_xticks(folds)
+            ax.set_ylim([0, 1.05])
+            ax.grid(True, alpha=0.3)
+            ax.legend(frameon=True)
+            plt.tight_layout()
+
+            if output_path:
+                save_figure_multi_format(fig, output_path, f"{filename_stem}_{metric}", ("png", "pdf"))
+
+            last_fig = fig
+
+        return last_fig
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     axes = axes.flatten()
     
@@ -158,7 +266,7 @@ def plot_metrics_panel(
         ax = axes[idx]
         for model in models:
             values = [fold.get(metric, np.nan) for fold in fold_results_dict[model]]
-            color = COLORS_MODELS.get(model, "#1f77b4")
+            color = model_color_map[model]
             ax.plot(folds, values, marker='o', label=model, linewidth=2.5,
                    markersize=7, color=color, alpha=0.8)
         

@@ -11,8 +11,14 @@ import json
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
+
+# Add project root to path for imports when executed as a script.
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import numpy as np
 import pandas as pd
@@ -36,6 +42,8 @@ try:
 except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
+
+from src.utils.figure_utils import plot_confusion_matrix_consistent
 
 
 def get_project_root() -> Path:
@@ -99,6 +107,7 @@ def _get_model_alias_map() -> Dict[str, str]:
 
 DEFAULT_MODEL_NAMES = _get_default_model_names()
 MODEL_ALIAS_MAP = _get_model_alias_map()
+HOLDOUT_TEST_SIZE = 0.2
 
 
 def parse_llm_label(content: str) -> Optional[int]:
@@ -526,33 +535,17 @@ def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=No
             if len(valid_df) > 0:
                 y_true = valid_df["true_label"].values
                 y_pred = valid_df["predicted_label"].values
-                cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-                
-                # Plot confusion matrix
-                fig, ax = plt.subplots(figsize=(6, 5))
-                im = ax.imshow(cm, cmap='Blues', aspect='auto')
-                ax.set_title(f"{model_name}\n{mode.replace('_', ' ').title()}", fontsize=13)
-                ax.set_xlabel("Predicted", fontsize=12)
-                ax.set_ylabel("True", fontsize=12)
-                
-                # Add text annotations
-                for i in range(2):
-                    for j in range(2):
-                        text = ax.text(j, i, cm[i, j],
-                                     ha="center", va="center",
-                                     color="white" if cm[i, j] > cm.max() / 2 else "black",
-                                     fontsize=14, fontweight='bold')
-                
-                ax.set_xticks([0, 1])
-                ax.set_yticks([0, 1])
-                ax.set_xticklabels(['No-meaningful', 'Meaningful'])
-                ax.set_yticklabels(['No-meaningful', 'Meaningful'])
-                
-                plt.colorbar(im, ax=ax, label="Count")
-                plt.tight_layout()
-                
+
                 filename = f"llm_{safe_name}_{mode}_confusion_matrix"
-                _save_figure_multi_format(fig, figures_dir, filename, ("png", "pdf"))
+                fig = plot_confusion_matrix_consistent(
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    title=f"{model_name} - {mode.replace('_', ' ').title()} Confusion Matrix (Held-out Test)",
+                    output_path=figures_dir,
+                    filename_stem=filename,
+                    class_labels=["No-Meaningful", "Meaningful"],
+                    formats=("png", "pdf"),
+                )
                 plt.close(fig)
                 
                 if logger:
@@ -678,13 +671,18 @@ def _load_default_train_test_split():
     train_texts, test_texts, train_labels, test_labels = train_test_split(
         texts,
         labels,
-        test_size=0.2,
+        test_size=HOLDOUT_TEST_SIZE,
         random_state=42,
         stratify=labels,
         shuffle=True,
     )
 
     return train_texts, test_texts, train_labels, test_labels
+
+
+def _resolve_llm_max_samples(test_size: int) -> int:
+    """Use full held-out test set so confusion matrices have matching sample counts across pipelines."""
+    return int(test_size)
 
 
 def main() -> int:
@@ -697,6 +695,7 @@ def main() -> int:
 
     try:
         train_texts, test_texts, train_labels, test_labels = _load_default_train_test_split()
+        max_samples = _resolve_llm_max_samples(len(test_texts))
         metrics = run_groq_llm_inference(
             test_texts=test_texts,
             test_labels=test_labels,
@@ -705,7 +704,7 @@ def main() -> int:
             artifacts_dir=str(artifacts_dir),
             logger=logger,
             model_names=DEFAULT_MODEL_NAMES,
-            max_samples=200,
+            max_samples=max_samples,
         )
     except Exception as exc:
         logger.error(f"Standalone LLM inference failed: {exc}")
@@ -716,10 +715,7 @@ def main() -> int:
         return 1
 
     logger.info("Standalone LLM inference completed successfully.")
-    
-    # Generate visualizations
-    _create_llm_visualizations(str(artifacts_dir), metrics, logger)
-    
+
     return 0
 
 
