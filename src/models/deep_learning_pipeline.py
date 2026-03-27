@@ -33,7 +33,7 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 import warnings
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import Dataset, DataLoader
@@ -44,6 +44,7 @@ from src.utils.path_resolver import get_pipeline_results_dirs
 from src.utils.data_loader import get_canonical_split
 from src.utils.figure_utils import (
     export_fold_metrics_csv,
+    plot_confusion_matrix_consistent,
     plot_fold_metrics_comparison,
     plot_metrics_panel,
     plot_loss_comparison,
@@ -135,38 +136,16 @@ def create_heldout_confusion_matrices(
     }
 
     for model_key, y_pred in pred_map.items():
-        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-        fig, ax = plt.subplots(figsize=(8, 7))
-        sns.heatmap(
-            cm,
-            annot=True,
-            fmt='d',
-            cmap='Blues',
-            ax=ax,
-            cbar=True,
-            cbar_kws={'label': 'Count'},
-            annot_kws={'fontsize': 14, 'fontweight': 'bold'}
+        title = f"{model_key.upper()} - Confusion Matrix (Held-out Test)"
+        fig = plot_confusion_matrix_consistent(
+            y_true=y_true,
+            y_pred=y_pred,
+            title=title,
+            output_path=figures_dir,
+            filename_stem=f"deep_learning_confusion_matrix_{model_key}_heldout_test",
+            class_labels=["No-Meaningful", "Meaningful"],
+            formats=("png", "pdf"),
         )
-        ax.set_title(f"{model_key.upper()} - Confusion Matrix (Held-out Test)", fontsize=13, fontweight="bold")
-        ax.set_xlabel("Predicted Label", fontsize=12, fontweight='bold')
-        ax.set_ylabel("True Label", fontsize=12, fontweight='bold')
-        ax.set_xticklabels(["No-Meaningful", "Meaningful"], rotation=45, ha='right')
-        ax.set_yticklabels(["No-Meaningful", "Meaningful"], rotation=0)
-
-        accuracy = (np.trace(cm) / np.sum(cm)) if np.sum(cm) > 0 else 0.0
-        ax.text(
-            0.5,
-            -0.12,
-            f"Accuracy: {accuracy:.4f} | Samples: {np.sum(cm)}",
-            ha="center",
-            va="top",
-            transform=ax.transAxes,
-            fontsize=10,
-            fontweight="bold",
-        )
-        ax.grid(False)
-        plt.tight_layout()
-        save_figure_multi_format(fig, figures_dir, f"deep_learning_confusion_matrix_{model_key}_heldout_test", ("png", "pdf"))
         plt.close(fig)
 
 
