@@ -20,7 +20,6 @@ project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-import importlib
 import jieba
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,36 +41,18 @@ from src.utils.figure_utils import (
     setup_professional_style,
     save_figure_multi_format
 )
+from src.utils.config import get_project_root
+from src.utils.path_resolver import get_pipeline_results_dirs
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score, 
                            classification_report, confusion_matrix, roc_curve, auc, log_loss)
-from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
-from imblearn.over_sampling import SMOTE
-import warnings
-import jieba
-import pickle
-from collections import Counter
-import logging
-import os
-import json
-import importlib
-from pathlib import Path
-from sklearn.model_selection import train_test_split
 from src.utils.data_loader import get_canonical_split
-
-cp = None
-cuSVC = None
-cuRandomForestClassifier = None
-cuMultinomialNB = None
-CUML_AVAILABLE = False
-CUDA_AVAILABLE = False
 
 try:
     from tqdm.auto import tqdm
@@ -99,46 +80,9 @@ def label_name_array(values):
     return np.where(arr == LABEL_MEANINGFUL, LABEL_DISPLAY_NAMES[LABEL_MEANINGFUL], LABEL_DISPLAY_NAMES[LABEL_NO_MEANINGFUL])
 
 
-def get_project_root():
-    """Resolve project root from env or repository layout."""
-    env_root = os.getenv('PROJECT_ROOT', '').strip()
-    if env_root:
-        return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[2]
-
-
 def get_results_dirs():
     """Create and return standardized results directories."""
-    project_root = get_project_root()
-    base = project_root / 'results' / 'machine_learning'
-    dirs = {
-        'base': base,
-        'figures': base / 'figures',
-        'artifacts': base / 'artifacts',
-        'models': base / 'models',
-        'reports': base / 'reports'
-    }
-    for directory in dirs.values():
-        directory.mkdir(parents=True, exist_ok=True)
-    return dirs
-
-
-def set_publication_style():
-    """Apply a clean publication-oriented plotting style."""
-    plt.style.use('seaborn-v0_8-whitegrid')
-    sns.set_theme(context='paper', style='whitegrid', palette='colorblind')
-    plt.rcParams.update({
-        'font.family': 'DejaVu Serif',
-        'font.size': 11,
-        'axes.titlesize': 13,
-        'axes.labelsize': 11,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
-        'legend.fontsize': 9,
-        'figure.titlesize': 14,
-        'axes.spines.top': False,
-        'axes.spines.right': False
-    })
+    return get_pipeline_results_dirs('machine_learning')
 
 # Set random seeds for reproducibility
 random.seed(42)
@@ -151,7 +95,7 @@ class BinaryTextClassifierComparison:
     """
     
     def __init__(self, max_features=5000, ngram_range=(1, 2), min_df=2, max_df=0.95,
-                 random_state=42, use_class_balancing=True, use_gpu=True):
+                 random_state=42, use_class_balancing=True):
         """
         Initialize the classifier comparison system.
         
@@ -162,7 +106,6 @@ class BinaryTextClassifierComparison:
             max_df: Maximum document frequency for terms
             random_state: Random state for reproducibility
             use_class_balancing: Whether to apply class weight balancing
-            use_gpu: Whether to use GPU-accelerated models when available
         """
         self.max_features = max_features
         self.ngram_range = ngram_range
@@ -170,18 +113,12 @@ class BinaryTextClassifierComparison:
         self.max_df = max_df
         self.random_state = random_state
         self.use_class_balancing = use_class_balancing
-        self.use_gpu = False
-        self.gpu_enabled = False
         
         self.vectorizer = None
         self.models = {}
         self.scalers = {}
         self.model_input_format = {}
-        self.model_backend = {}
         self.class_weights = None
-
-        if use_gpu:
-            logger.info("GPU mode was requested, but this pipeline is configured for CPU-only sklearn models.")
         
         # Initialize models (will be updated with class weights if needed)
         self._initialize_models()
@@ -236,28 +173,6 @@ class BinaryTextClassifierComparison:
             'Random_Forest': rf_model
         }
 
-        self.model_backend = {
-            'SVM': 'cpu',
-            'Naive_Bayes': 'cpu',
-            'Random_Forest': 'cpu'
-        }
-
-    def _prepare_gpu_features(self, X):
-        """Convert features to dense CuPy array for cuML models."""
-        if hasattr(X, 'toarray'):
-            X = X.toarray()
-        return cp.asarray(np.asarray(X, dtype=np.float32))
-
-    def _prepare_gpu_labels(self, y):
-        """Convert labels to CuPy array for cuML models."""
-        return cp.asarray(np.asarray(y, dtype=np.int32))
-
-    def _to_numpy(self, arr):
-        """Convert CuPy/pandas outputs to NumPy arrays for metric computation."""
-        if cp is not None and isinstance(arr, cp.ndarray):
-            return cp.asnumpy(arr)
-        return np.asarray(arr)
-        
     def preprocess_chinese_text(self, text):
         """
         Preprocess Chinese text by word segmentation.
@@ -424,15 +339,6 @@ class BinaryTextClassifierComparison:
 
             # Default assumption: model can consume sparse input directly.
             self.model_input_format[name] = 'sparse'
-
-            if self.model_backend.get(name) == 'gpu':
-                X_train_gpu = self._prepare_gpu_features(X_train_tfidf)
-                y_train_gpu = self._prepare_gpu_labels(y_train)
-                model.fit(X_train_gpu, y_train_gpu)
-                self.model_input_format[name] = 'gpu_dense'
-                train_time = time.perf_counter() - start_time
-                logger.info(f"{name} training completed in {train_time:.4f}s (GPU)")
-                continue
             
             # Handle different model types
             if name == 'SVM' and hasattr(X_train_tfidf, 'todense'):
@@ -485,28 +391,6 @@ class BinaryTextClassifierComparison:
         
         for name, model in self.models.items():
             start_time = time.perf_counter()
-
-            if self.model_backend.get(name) == 'gpu':
-                X_test_gpu = self._prepare_gpu_features(X_test_tfidf)
-                y_pred = self._to_numpy(model.predict(X_test_gpu)).astype(int)
-
-                if hasattr(model, 'predict_proba'):
-                    y_proba = self._to_numpy(model.predict_proba(X_test_gpu))
-                else:
-                    # Fallback when probability output is unavailable.
-                    y_proba = np.zeros((len(y_pred), 2), dtype=np.float32)
-                    y_proba[np.arange(len(y_pred)), y_pred] = 1.0
-
-                if y_proba.ndim == 1:
-                    y_proba = np.vstack([1.0 - y_proba, y_proba]).T
-
-                inference_time = time.perf_counter() - start_time
-                predictions[name] = {
-                    'predictions': y_pred,
-                    'probabilities': y_proba,
-                    'inference_time': inference_time
-                }
-                continue
             
             # Apply scaling if used during training
             if name in self.scalers:
@@ -592,11 +476,8 @@ class BinaryTextClassifierComparison:
             'models': self.models,
             'scalers': self.scalers,
             'model_input_format': self.model_input_format,
-            'model_backend': self.model_backend,
             'class_weights': self.class_weights,
             'use_class_balancing': self.use_class_balancing,
-            'use_gpu': self.use_gpu,
-            'gpu_enabled': self.gpu_enabled
         }
         
         filepath = f"{filepath_prefix}_all_models.pkl"
@@ -618,64 +499,9 @@ class BinaryTextClassifierComparison:
         self.models = model_data['models']
         self.scalers = model_data.get('scalers', {})
         self.model_input_format = model_data.get('model_input_format', {})
-        self.model_backend = model_data.get('model_backend', {})
         self.class_weights = model_data.get('class_weights', None)
         self.use_class_balancing = model_data.get('use_class_balancing', True)
-        self.use_gpu = model_data.get('use_gpu', self.use_gpu)
-        self.gpu_enabled = model_data.get('gpu_enabled', False)
         logger.info(f"All models and class weights loaded from {filepath}")
-
-def load_and_clean_data(path):
-    """
-    Load and clean the dataset with proper CSV parsing.
-    
-    Args:
-        path: Path to the CSV file
-        
-    Returns:
-        Cleaned DataFrame
-    """
-    logger.info("Loading and cleaning data...")
-    
-    try:
-        data = pd.read_csv(path, encoding='utf-8', quotechar='"', skipinitialspace=True)
-    except Exception as e:
-        logger.warning(f"Standard CSV reading failed: {e}")
-        data = pd.read_csv(path, encoding='utf-8', quotechar='"', 
-                          skipinitialspace=True, on_bad_lines='skip')
-    
-    logger.info(f"Data columns: {list(data.columns)}")
-    logger.info(f"Data shape: {data.shape}")
-    
-    # Clean text column
-    if 'text' in data.columns:
-        data['text'] = data['text'].apply(
-            lambda x: str(x).replace('\n', ' ').replace('\r', ' ').strip() 
-            if pd.notna(x) else ""
-        )
-        data = data[data['text'] != '']
-    
-    # Clean label column
-    if 'label' in data.columns:
-        data['label'] = pd.to_numeric(data['label'], errors='coerce')
-        data = data.dropna(subset=['label'])
-        data['label'] = data['label'].astype(int)
-        
-        unique_labels = data['label'].unique()
-        logger.info(f"Unique labels found: {sorted(unique_labels)}")
-        
-        # Accept either {0,1} or {1,2} input labels.
-        if set(unique_labels).issubset({1, 2}):
-            data['label'] = data['label'].replace({2: 0})
-            logger.info("Mapped labels from {1,2} to internal {1,0} for training.")
-
-        valid_labels = data['label'].isin([0, 1])
-        if not valid_labels.all():
-            logger.warning(f"Found invalid labels. Keeping only 0 and 1.")
-            data = data[valid_labels]
-    
-    logger.info(f"Final cleaned data shape: {data.shape}")
-    return data
 
 def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, class_distribution, output_path):
     """
@@ -687,7 +513,7 @@ def create_comprehensive_visualizations(fold_results_dict, avg_metrics_dict, cla
         class_distribution: Dictionary with class distribution statistics
     """
     # Set style for publication-quality plots
-    set_publication_style()
+    setup_professional_style()
     
     output_dir = Path(output_path).parent
     models = list(avg_metrics_dict.keys())
@@ -892,7 +718,7 @@ def apply_smote_resampling(X_train, y_train, random_state=42):
 
 def plot_smote_before_after(y_before, y_after, output_path='./smote_before_after_distribution.png'):
     """Plot class distribution before and after SMOTE to show balancing effect."""
-    set_publication_style()
+    setup_professional_style()
     class_order = [0, 1]
     class_labels = ['No-Meaningful', 'Meaningful']
     # Professional, colorblind-friendly pair (blue/orange).
@@ -925,7 +751,6 @@ def run_comprehensive_experiment():
     """
     Run the comprehensive experiment comparing SVM, Naive Bayes, and Random Forest with class balancing.
     """
-    use_gpu = False
     logger.info("Machine learning pipeline is running in CPU-only mode (sklearn).")
 
     # Load and prepare data using the CANONICAL split shared by all pipelines.
@@ -950,7 +775,7 @@ def run_comprehensive_experiment():
     logger.info(f"Canonical split: {len(cv_texts)} train, {len(test_texts)} test")
     
     # Initialize classifier comparison system. We apply SMOTE, so class weights are disabled.
-    classifier_system = BinaryTextClassifierComparison(use_class_balancing=False, use_gpu=use_gpu)
+    classifier_system = BinaryTextClassifierComparison(use_class_balancing=False)
     
     # Analyze data distribution
     class_distribution = classifier_system.analyze_data_distribution(labels, "Original Data Distribution")
@@ -990,7 +815,7 @@ def run_comprehensive_experiment():
         val_labels = cv_labels[val_idx]
         
         # Analyze fold distribution
-        fold_classifier = BinaryTextClassifierComparison(use_class_balancing=False, use_gpu=use_gpu)
+        fold_classifier = BinaryTextClassifierComparison(use_class_balancing=False)
         fold_classifier.analyze_data_distribution(train_labels, f"Fold {fold+1} Training Distribution")
         fold_classifier.analyze_data_distribution(val_labels, f"Fold {fold+1} Validation Distribution")
         
@@ -1154,7 +979,7 @@ def run_comprehensive_experiment():
     
     # Save best models (trained on SMOTE-balanced training data)
     logger.info("Training final models on SMOTE-balanced CV training split for saving...")
-    final_classifier = BinaryTextClassifierComparison(use_class_balancing=False, use_gpu=use_gpu)
+    final_classifier = BinaryTextClassifierComparison(use_class_balancing=False)
     X_train_tfidf, X_test_tfidf = final_classifier.fit_transform_features(cv_texts, test_texts)
     X_train_smote_final, y_train_smote_final = apply_smote_resampling(X_train_tfidf, cv_labels, random_state=42)
     plot_smote_before_after(
@@ -1233,13 +1058,6 @@ def run_comprehensive_experiment():
             'ngram_range': final_classifier.ngram_range,
             'min_df': final_classifier.min_df,
             'max_df': final_classifier.max_df
-        },
-        'gpu': {
-            'requested': bool(use_gpu),
-            'enabled': bool(final_classifier.gpu_enabled),
-            'cuml_available': bool(CUML_AVAILABLE),
-            'cuda_available': bool(CUDA_AVAILABLE),
-            'model_backend': final_classifier.model_backend
         },
         'cv_avg_metrics': avg_metrics,
         'cv_best_fold_metrics': best_fold_summary,
@@ -1507,7 +1325,7 @@ def create_train_loss_plots(fold_results_dict, output_dir='.'):
     Plot training and validation log-loss curves across folds for each model.
     """
     os.makedirs(output_dir, exist_ok=True)
-    set_publication_style()
+    setup_professional_style()
     models = ['SVM', 'Naive_Bayes', 'Random_Forest']
     folds = range(1, len(fold_results_dict[models[0]]) + 1)
 

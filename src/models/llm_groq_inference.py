@@ -23,7 +23,6 @@ if str(project_root) not in sys.path:
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-from sklearn.model_selection import train_test_split
 
 try:
     import matplotlib.pyplot as plt
@@ -43,70 +42,24 @@ except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
 
+from src.utils.config import get_project_root, load_env_file, get_groq_api_key, get_llm_model_names
+from src.utils.path_resolver import get_llm_results_dir
 from src.utils.data_loader import get_canonical_split
-from src.utils.figure_utils import plot_confusion_matrix_consistent
-
-
-def get_project_root() -> Path:
-    """Resolve project root from env or repository layout."""
-    env_root = os.getenv("PROJECT_ROOT", "").strip()
-    if env_root:
-        return Path(env_root).expanduser().resolve()
-    
-    # Search for project root by finding Comment-Classification directory markers
-    current = Path(__file__).resolve().parent
-    while current != current.parent:
-        # Check if this looks like the project root
-        if (current / "data").exists() and (current / "src" / "models").exists():
-            return current
-        current = current.parent
-    
-    # Fallback to parents[2]
-    return Path(__file__).resolve().parents[2]
-
-
-def _load_env_file() -> None:
-    """Load simple KEY=VALUE pairs from project .env into process environment."""
-    env_path = get_project_root() / ".env"
-    if not env_path.exists():
-        return
-
-    project_root = get_project_root()
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        
-        # Resolve relative paths with respect to project root
-        if key == "DATA_FILE" and value.startswith("./"):
-            value = str((project_root / value).resolve())
-        elif key == "DATA_FILE" and not Path(value).is_absolute():
-            value = str((project_root / value).resolve())
-        
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-def _get_default_model_names() -> List[str]:
-    """Get LLM model names from environment or use hardcoded defaults."""
-    _load_env_file()
-    env_models = os.getenv("LLM_MODEL_NAMES", "").strip()
-    if env_models:
-        return [m.strip() for m in env_models.split(",") if m.strip()]
-    return ["openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
+from src.utils.figure_utils import (
+    plot_confusion_matrix_consistent,
+    setup_professional_style,
+    save_figure_multi_format,
+)
 
 
 def _get_model_alias_map() -> Dict[str, str]:
     """Build model alias map from environment configuration."""
-    _load_env_file()
-    models = _get_default_model_names()
+    load_env_file()
+    models = get_llm_model_names()
     return {model: model for model in models}
 
 
-DEFAULT_MODEL_NAMES = _get_default_model_names()
+DEFAULT_MODEL_NAMES = get_llm_model_names()
 MODEL_ALIAS_MAP = _get_model_alias_map()
 HOLDOUT_TEST_SIZE = 0.2
 
@@ -210,8 +163,7 @@ def select_few_shot_examples(train_texts, train_labels, max_per_class=3):
 
 def _get_groq_api_key() -> Optional[str]:
     """Read Groq API key from supported environment variable names."""
-    _load_env_file()
-    return os.getenv("GROQ_API_KEY") or os.getenv("Groq_API_KEY")
+    return get_groq_api_key()
 
 
 def _resolve_model_name(requested_model: str) -> str:
@@ -256,14 +208,6 @@ def _request_label_prediction(client, model_name: str, prompt: str) -> tuple[str
         except Exception:
             parsed = None
     return response_text, parsed
-
-
-def get_llm_results_dir() -> Path:
-    """Create and return standardized output directory for LLM artifacts."""
-    project_root = get_project_root()
-    out_dir = project_root / "results" / "llm"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
 
 
 def _calc_metrics(df: pd.DataFrame) -> Dict[str, float]:
@@ -487,41 +431,6 @@ def run_groq_llm_inference(
     return all_metrics
 
 
-def _setup_professional_style() -> None:
-    """Apply professional publication-oriented plotting style."""
-    if plt is None or sns is None:
-        return
-    
-    plt.style.use('seaborn-v0_8-whitegrid')
-    plt.rcParams.update({
-        'figure.dpi': 100,
-        'savefig.dpi': 600,
-        'font.size': 11,
-        'font.family': 'sans-serif',
-        'axes.labelsize': 12,
-        'axes.titlesize': 13,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
-        'legend.fontsize': 10,
-        'legend.framealpha': 0.95,
-        'axes.grid': True,
-        'grid.alpha': 0.3,
-        'grid.linestyle': ':',
-    })
-    sns.set_palette("husl")
-
-
-def _save_figure_multi_format(fig: plt.Figure, output_path: Path, filename_stem: str, formats: tuple = ("png", "pdf")) -> None:
-    """Save figure in multiple formats with consistent DPI."""
-    if plt is None:
-        return
-    
-    output_path.mkdir(parents=True, exist_ok=True)
-    for fmt in formats:
-        filepath = output_path / f"{filename_stem}.{fmt}"
-        fig.savefig(filepath, dpi=600, bbox_inches='tight', format=fmt)
-
-
 def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=None) -> None:
     """Generate confusion matrices and metrics comparison figures for LLM models."""
     if plt is None or sns is None:
@@ -529,7 +438,7 @@ def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=No
             logger.warning("matplotlib/seaborn not available. Skipping LLM visualizations.")
         return
     
-    _setup_professional_style()
+    setup_professional_style()
     output_dir = Path(artifacts_dir)
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
@@ -619,7 +528,7 @@ def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=No
         ax.grid(True, alpha=0.3, axis='y')
         
         plt.tight_layout()
-        _save_figure_multi_format(fig, figures_dir, "llm_metrics_comparison", ("png", "pdf"))
+        save_figure_multi_format(fig, figures_dir, "llm_metrics_comparison", ("png", "pdf"))
         plt.close(fig)
         
         if logger:
@@ -656,7 +565,7 @@ def _create_llm_visualizations(artifacts_dir: str, metrics_dict: Dict, logger=No
         
         plt.xticks(rotation=15, ha='right')
         plt.tight_layout()
-        _save_figure_multi_format(fig, figures_dir, "llm_f1_score_comparison", ("png", "pdf"))
+        save_figure_multi_format(fig, figures_dir, "llm_f1_score_comparison", ("png", "pdf"))
         plt.close(fig)
         
         if logger:

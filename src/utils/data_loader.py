@@ -71,6 +71,7 @@ def load_and_clean_data(data_file: Path = None) -> pd.DataFrame:
         raise ValueError("Dataset must contain 'text' and 'label' columns")
 
     # Clean text -------------------------------------------------------
+    data = data.dropna(subset=["text"])
     data["text"] = data["text"].astype(str)
     data["text"] = (
         data["text"]

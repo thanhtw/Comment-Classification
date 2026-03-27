@@ -15,16 +15,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from src.utils.config import get_project_root
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-def get_project_root() -> Path:
-    env_root = os.getenv("PROJECT_ROOT", "").strip()
-    if env_root:
-        return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[2]
 
 
 class CrossPipelineBestFoldReporter:

@@ -27,7 +27,6 @@ import pandas as pd
 import torch
 from datasets import Dataset
 from sklearn.metrics import (
-    ConfusionMatrixDisplay,
     classification_report,
     confusion_matrix,
     f1_score,
@@ -45,8 +44,10 @@ from transformers import (
     TrainingArguments,
 )
 
-# Import professional figure utilities
-from src.utils.data_loader import get_canonical_split
+# Import shared utilities
+from src.utils.config import get_project_root
+from src.utils.path_resolver import get_pipeline_results_dirs
+from src.utils.data_loader import get_canonical_split, load_and_clean_data
 from src.utils.figure_utils import (
     export_fold_metrics_csv,
     plot_confusion_matrix_consistent,
@@ -69,26 +70,11 @@ def log_info(message: str) -> None:
     logger.info(message)
 
 
-def get_project_root() -> Path:
-    env_root = os.getenv("PROJECT_ROOT", "").strip()
-    if env_root:
-        return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[2]
-
-
 def get_results_dirs() -> dict:
-    project_root = get_project_root()
-    base = project_root / "results" / "transformer"
-    dirs = {
-        "base": base,
-        "figures": base / "figures",
-        "artifacts": base / "artifacts",
-        "models": base / "models",
-        "reports": base / "reports",
-        "runs": base / "runs",
-    }
-    for directory in dirs.values():
-        directory.mkdir(parents=True, exist_ok=True)
+    dirs = get_pipeline_results_dirs('transformer')
+    # Transformer also needs a 'runs' directory
+    dirs["runs"] = dirs["base"] / "runs"
+    dirs["runs"].mkdir(parents=True, exist_ok=True)
     return dirs
 
 
@@ -119,8 +105,6 @@ class WeightedTrainer(Trainer):
 class TransformerComparisonPipeline:
     def __init__(self) -> None:
         self.result_dirs = get_results_dirs()
-        project_root = get_project_root()
-        self.data_file = Path(os.getenv("DATA_FILE", str(project_root / "data" / "Dataset.csv")))
         self.num_folds = 10
 
         self.models_config = {
@@ -178,57 +162,11 @@ class TransformerComparisonPipeline:
         class_weights = compute_class_weight("balanced", classes=np.unique(labels), y=labels)
         return {i: weight for i, weight in enumerate(class_weights)}
 
-    def _set_publication_style(self) -> None:
-        plt.style.use("seaborn-v0_8-whitegrid")
-        plt.rcParams.update(
-            {
-                "font.family": "DejaVu Serif",
-                "font.size": 10,
-                "axes.titlesize": 12,
-                "axes.labelsize": 10,
-                "xtick.labelsize": 9,
-                "ytick.labelsize": 9,
-                "legend.fontsize": 9,
-                "figure.titlesize": 13,
-                "axes.spines.top": False,
-                "axes.spines.right": False,
-            }
-        )
-
     def _save_figure_multi_format(self, fig: plt.Figure, filename_stem: str) -> None:
-        for fmt in self.figure_formats:
-            fig.savefig(self.result_dirs["figures"] / f"{filename_stem}.{fmt}", dpi=self.figure_dpi, bbox_inches="tight")
+        save_figure_multi_format(fig, self.result_dirs["figures"], filename_stem, self.figure_formats)
 
     def _load_data(self) -> None:
-        try:
-            self.data = pd.read_csv(self.data_file, encoding="utf-8", quotechar='"', skipinitialspace=True)
-        except Exception:
-            self.data = pd.read_csv(
-                self.data_file,
-                encoding="utf-8",
-                quotechar='"',
-                skipinitialspace=True,
-                on_bad_lines="skip",
-            )
-
-        if "text" not in self.data.columns or "label" not in self.data.columns:
-            raise ValueError("Dataset must contain 'text' and 'label' columns.")
-
-        self.data = self.data.copy()
-        self.data["text"] = self.data["text"].apply(
-            lambda x: str(x).replace("\n", " ").replace("\r", " ").strip() if pd.notna(x) else ""
-        )
-        self.data = self.data[self.data["text"] != ""]
-
-        self.data["label"] = pd.to_numeric(self.data["label"], errors="coerce")
-        self.data = self.data.dropna(subset=["label"])
-        self.data["label"] = self.data["label"].astype(int)
-
-        if set(self.data["label"].unique()).issubset({1, 2}):
-            self.data["label"] = self.data["label"].replace({2: 0})
-
-        self.data = self.data[self.data["label"].isin([0, 1])]
-
+        self.data = load_and_clean_data()
         log_info(f"Dataset loaded: {self.data.shape}")
         log_info(f"Label distribution:\n{self.data['label'].value_counts()}")
 
@@ -241,8 +179,12 @@ class TransformerComparisonPipeline:
             attention_probs_dropout_prob=0.1,
         )
 
-        train_dataset = Dataset.from_pandas(train_df[["text", "label"]], preserve_index=False)
-        val_dataset = Dataset.from_pandas(val_df[["text", "label"]], preserve_index=False)
+        train_subset = train_df[["text", "label"]].copy()
+        val_subset = val_df[["text", "label"]].copy()
+        train_subset["text"] = train_subset["text"].astype(str)
+        val_subset["text"] = val_subset["text"].astype(str)
+        train_dataset = Dataset.from_pandas(train_subset, preserve_index=False)
+        val_dataset = Dataset.from_pandas(val_subset, preserve_index=False)
 
         def tokenize_function(examples):
             return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=200)
@@ -357,7 +299,9 @@ class TransformerComparisonPipeline:
             tokenizer = model_cfg["tokenizer_class"].from_pretrained(str(best_dir))
             model = model_cfg["model_class"].from_pretrained(str(best_dir))
 
-            test_dataset = Dataset.from_pandas(self.test_data[["text", "label"]], preserve_index=False)
+            test_subset = self.test_data[["text", "label"]].copy()
+            test_subset["text"] = test_subset["text"].astype(str)
+            test_dataset = Dataset.from_pandas(test_subset, preserve_index=False)
 
             def tokenize_function(examples):
                 return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=200)
@@ -421,7 +365,7 @@ class TransformerComparisonPipeline:
 
     def _plot_model_comparison(self, comparison_df: pd.DataFrame) -> None:
         """Create professional comparative visualizations of model performance."""
-        self._set_publication_style()
+        setup_professional_style()
         
         # Export per-fold metrics to CSV for all models
         output_path = self.result_dirs["figures"]

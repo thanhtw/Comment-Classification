@@ -15,7 +15,10 @@ def get_pipeline_results_dirs(pipeline_name: str) -> Dict[str, Path]:
     Returns:
         Dict with keys: base, artifacts, figures, models, reports
     """
+    project_root = get_project_root()
     results_root = get_results_root()
+    if not results_root.is_absolute():
+        results_root = (project_root / results_root).resolve()
     base = results_root / pipeline_name
     
     dirs = {
@@ -39,7 +42,10 @@ def get_llm_results_dir() -> Path:
     Returns:
         Path to results/llm/
     """
+    project_root = get_project_root()
     results_root = get_results_root()
+    if not results_root.is_absolute():
+        results_root = (project_root / results_root).resolve()
     out_dir = results_root / "llm"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
@@ -51,7 +57,10 @@ def get_cross_pipeline_dirs() -> Dict[str, Path]:
     Returns:
         Dict with keys: artifacts, figures, reports
     """
+    project_root = get_project_root()
     results_root = get_results_root()
+    if not results_root.is_absolute():
+        results_root = (project_root / results_root).resolve()
     
     dirs = {
         "artifacts": results_root / "artifacts",

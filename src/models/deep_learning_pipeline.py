@@ -27,7 +27,6 @@ import numpy as np
 import pandas as pd
 import pickle
 import random
-import re
 import seaborn as sns
 import torch
 import torch.nn as nn
@@ -35,11 +34,13 @@ import torch.optim as optim
 import time
 import warnings
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
-from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import Dataset, DataLoader
 
 # Import professional figure utilities
+from src.utils.config import get_project_root
+from src.utils.path_resolver import get_pipeline_results_dirs
 from src.utils.data_loader import get_canonical_split
 from src.utils.figure_utils import (
     export_fold_metrics_csv,
@@ -58,12 +59,9 @@ logger = logging.getLogger(__name__)
 HOLDOUT_TEST_SIZE = 0.2
 
 
-def get_project_root():
-    """Resolve project root from env or repository layout."""
-    env_root = os.getenv('PROJECT_ROOT', '').strip()
-    if env_root:
-        return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[2]
+def get_results_dirs():
+    """Create and return standardized output directories for deep learning pipeline."""
+    return get_pipeline_results_dirs('deep_learning')
 
 # Set random seeds for reproducibility
 random.seed(42)
@@ -88,22 +86,6 @@ def log_to_report(message, level="INFO"):
         logger.warning(message)
     elif level == "ERROR":
         logger.error(message)
-
-
-def get_results_dirs():
-    """Create and return standardized output directories for deep learning pipeline."""
-    project_root = get_project_root()
-    base = project_root / 'results' / 'deep_learning'
-    dirs = {
-        'base': base,
-        'figures': base / 'figures',
-        'artifacts': base / 'artifacts',
-        'models': base / 'models',
-        'reports': base / 'reports'
-    }
-    for directory in dirs.values():
-        directory.mkdir(parents=True, exist_ok=True)
-    return dirs
 
 
 def ensure_output_dir(output_dir):
@@ -206,76 +188,6 @@ def run_inference(model, data_loader, device):
     inference_time = time.perf_counter() - start_time
     avg_attention = np.mean(attention_weights) if attention_weights else 0
     return np.array(probs), inference_time, avg_attention
-
-# 1. Data loading and cleaning
-def load_and_clean_data(path):
-    """Load and clean the dataset with proper CSV parsing."""
-    log_to_report("Starting data loading and cleaning...")
-    
-    try:
-        # Try different encodings if UTF-8 fails
-        for encoding in ['utf-8', 'gbk', 'gb2312']:
-            try:
-                data = pd.read_csv(path, encoding=encoding, quotechar='"', skipinitialspace=True)
-                log_to_report(f"Successfully loaded data with {encoding} encoding")
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            # If all encodings fail, try with error handling
-            data = pd.read_csv(path, encoding='utf-8', quotechar='"', 
-                              skipinitialspace=True, on_bad_lines='skip', errors='ignore')
-            log_to_report("Loaded data with error handling", "WARNING")
-    except Exception as e:
-        log_to_report(f"Data loading failed: {e}", "ERROR")
-        raise
-    
-    log_to_report(f"Data columns: {list(data.columns)}")
-    log_to_report(f"Initial data shape: {data.shape}")
-    
-    # Clean text column
-    if 'text' in data.columns:
-        original_count = len(data)
-        data['text'] = data['text'].apply(
-            lambda x: str(x).replace('\n', ' ').replace('\r', ' ').strip() 
-            if pd.notna(x) else ""
-        )
-        data = data[data['text'] != '']
-        log_to_report(f"Removed {original_count - len(data)} empty text entries")
-    else:
-        log_to_report("No 'text' column found", "ERROR")
-        raise ValueError("Dataset must contain 'text' column")
-    
-    # Clean label column - ensure binary classification (0, 1)
-    if 'label' in data.columns:
-        original_count = len(data)
-        data['label'] = pd.to_numeric(data['label'], errors='coerce')
-        data = data.dropna(subset=['label'])
-        data['label'] = data['label'].astype(int)
-        
-        unique_labels = sorted(data['label'].unique())
-        log_to_report(f"Unique labels found: {unique_labels}")
-        
-        # Ensure only binary labels (0, 1)
-        valid_labels = data['label'].isin([0, 1])
-        if not valid_labels.all():
-            log_to_report(f"Found invalid labels. Keeping only 0 and 1.", "WARNING")
-            data = data[valid_labels]
-            
-        # Check class distribution
-        label_counts = data['label'].value_counts().sort_index()
-        log_to_report(f"Class distribution:\n{label_counts}")
-        
-        # Calculate class imbalance ratio
-        imbalance_ratio = label_counts.max() / label_counts.min()
-        log_to_report(f"Class imbalance ratio: {imbalance_ratio:.2f}")
-        
-    else:
-        log_to_report("No 'label' column found", "ERROR")
-        raise ValueError("Dataset must contain 'label' column")
-    
-    log_to_report(f"Final cleaned data shape: {data.shape}")
-    return data
 
 # 2. Chinese text preprocessing
 def preprocess_chinese_text(text):

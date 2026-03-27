@@ -1,0 +1,24 @@
+name: comment-classification
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy=1.26.4
+  - pandas=3.0.1
+  - scipy=1.13.1
+  - scikit-learn=1.5.2
+  - matplotlib=3.10.8
+  - seaborn=0.13.2
+  - pip
+  - pip:
+      - torch==2.10.0
+      - transformers==4.41.2
+      - datasets==2.20.0
+      - accelerate==1.13.0
+      - imbalanced-learn==0.14.1
+      - jieba==0.42.1
+      - groq==1.1.1
+      - python-dotenv==1.0.1
